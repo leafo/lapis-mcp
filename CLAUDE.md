@@ -2,6 +2,9 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+When making any changes to the implementation of the MCP protocol, please
+review `mcp-guide.md` first.
+
 ## Build Commands
 
 ```bash

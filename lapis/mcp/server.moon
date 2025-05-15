@@ -68,27 +68,18 @@ class McpServer
   -- Tool implementations
   list_routes: =>
     routes = {}
+    assert @app, "Missing app class"
+    router = @.app!.router
+    router\build!
 
-    if @app and @app.router and @app.router.named_routes
-      for name, route in pairs(@app.router.named_routes)
-        insert routes, {
-          name: name
-          path: route[1]
-          method: route[2] or "GET"
-        }
+    tuples = [{k,v} for k,v in pairs router.named_routes]
+    table.sort tuples, (a,b) -> a[1] < b[1]
 
-    return routes
+    tuples
 
   list_models: =>
     models = {}
-
-    -- Attempt to discover models in standard locations
-    ok, db = pcall(require, "models")
-    if ok and type(db) == "table"
-      for name, model in pairs(db)
-        if type(model) == "table" and model.__base
-          insert models, name
-
+    error("not implemented yet")
     return models
 
   get_model_schema: (model_name) =>
@@ -99,19 +90,8 @@ class McpServer
 
     model = db[model_name]
 
-    -- Extract schema information if available
-    schema = {}
-
-    if model.columns
-      for name, type in pairs(model.columns)
-        schema[name] = {
-          type: type
-        }
-
-    if model.relations
-      schema._relations = model.relations
-
-    return schema
+    error "TODO"
+    return {}
 
   -- Message handler
   handle_message: (message) =>
@@ -143,7 +123,7 @@ class McpServer
 
       -- Call the tool handler
       result = nil
-      ok, result_or_error = pcall(tool.handler, params)
+      ok, result_or_error = pcall(tool.handler, @, params)
 
       if not ok
         return {
@@ -193,6 +173,11 @@ class McpServer
         vendor: "Lapis"
       }
     }
+
+  -- Send a single message and get response
+  send_message: (message) =>
+    response = @handle_message(message)
+    return response
 
   -- Server main loop
   run: =>

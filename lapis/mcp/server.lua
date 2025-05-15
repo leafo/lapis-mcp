@@ -69,27 +69,30 @@ do
     end,
     list_routes = function(self)
       local routes = { }
-      if self.app and self.app.router and self.app.router.named_routes then
-        for name, route in pairs(self.app.router.named_routes) do
-          insert(routes, {
-            name = name,
-            path = route[1],
-            method = route[2] or "GET"
-          })
+      assert(self.app, "Missing app class")
+      local router = self.app().router
+      router:build()
+      local tuples
+      do
+        local _accum_0 = { }
+        local _len_0 = 1
+        for k, v in pairs(router.named_routes) do
+          _accum_0[_len_0] = {
+            k,
+            v
+          }
+          _len_0 = _len_0 + 1
         end
+        tuples = _accum_0
       end
-      return routes
+      table.sort(tuples, function(a, b)
+        return a[1] < b[1]
+      end)
+      return tuples
     end,
     list_models = function(self)
       local models = { }
-      local ok, db = pcall(require, "models")
-      if ok and type(db) == "table" then
-        for name, model in pairs(db) do
-          if type(model) == "table" and model.__base then
-            insert(models, name)
-          end
-        end
-      end
+      error("not implemented yet")
       return models
     end,
     get_model_schema = function(self, model_name)
@@ -98,18 +101,8 @@ do
         return nil, "Model not found: " .. tostring(model_name)
       end
       local model = db[model_name]
-      local schema = { }
-      if model.columns then
-        for name, type in pairs(model.columns) do
-          schema[name] = {
-            type = type
-          }
-        end
-      end
-      if model.relations then
-        schema._relations = model.relations
-      end
-      return schema
+      error("TODO")
+      return { }
     end,
     handle_message = function(self, message)
       if message.type == "tool_call" then
@@ -137,7 +130,7 @@ do
           end
         end
         local result = nil
-        local ok, result_or_error = pcall(tool.handler, params)
+        local ok, result_or_error = pcall(tool.handler, self, params)
         if not ok then
           return {
             type = "tool_result",
@@ -184,6 +177,10 @@ do
           vendor = "Lapis"
         }
       }
+    end,
+    send_message = function(self, message)
+      local response = self:handle_message(message)
+      return response
     end,
     run = function(self)
       self:write_json_chunk(self:get_server_info())
