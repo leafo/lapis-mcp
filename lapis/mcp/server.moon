@@ -27,6 +27,20 @@ class StreamableHttpTransport
   write_json_chunk: =>
     error "TODO"
 
+with_initialized = (fn) ->
+  (message) =>
+    unless @initialized
+      return {
+        jsonrpc: "2.0"
+        id: message.id
+        error: {
+          code: -32002
+          message: "Server not initialized. Call initialize first."
+        }
+      }
+
+    fn @, message
+
 class McpServer
   new: (@app, @debug = false) =>
     @setup_tools!
@@ -144,122 +158,29 @@ class McpServer
   handle_message: (message) =>
     @debug_log "info", "Received message: #{message.method}"
 
-    if message.method == "initialize"
-      return @handle_initialize(message)
-    elseif message.method == "tools/call"
-      -- Check if server is initialized
-      unless @initialized
-        return {
+    switch message.method
+      when "initialize"
+        @handle_initialize message
+      when "notifications/initialized"
+        @debug_log "info", "Client notified initialized"
+        @client_initialized = true
+      when "notifications/cancelled"
+        @handle_notifications_canceled message
+      when "tools/list"
+        @debug_log "info", "Listing available tools"
+        @handle_tools_list message
+      when "tools/call"
+        @handle_tools_call message
+      else
+        @debug_log "warning", "Unknown method: #{message.method}"
+        {
           jsonrpc: "2.0"
           id: message.id
           error: {
-            code: -32002
-            message: "Server not initialized. Call initialize first."
+            code: -32601
+            message: "Method not found: #{message.method}"
           }
         }
-
-      tool_name = message.params.name
-      params = message.params.arguments or {}
-
-      @debug_log "info", "Executing tool: #{tool_name}"
-
-      unless @tools[tool_name]
-        return {
-          jsonrpc: "2.0"
-          id: message.id
-          result: {
-            content: {
-              {
-                type: "text"
-                text: "Unknown tool: #{tool_name}"
-              }
-            }
-            isError: true
-          }
-        }
-
-      tool = @tools[tool_name]
-
-      -- Validate required parameters
-      for param_name in *tool.inputSchema.required
-        if not params[param_name]
-          return {
-            jsonrpc: "2.0"
-            id: message.id
-            result: {
-              content: {
-                {
-                  type: "text"
-                  text: "Missing required parameter: #{param_name}"
-                }
-              }
-              isError: true
-            }
-          }
-
-      -- Call the tool handler
-      ok, result_or_error = pcall(tool.handler, @, params)
-
-      if not ok
-        @debug_log "error", "Tool execution failed: #{result_or_error}"
-        return {
-          jsonrpc: "2.0"
-          id: message.id
-          result: {
-            content: {
-              {
-                type: "text"
-                text: "Error executing tool: #{result_or_error}"
-              }
-            }
-            isError: true
-          }
-        }
-
-      -- Handle error result from tool
-      if result_or_error.error
-        @debug_log "warning", "Tool returned error: #{result_or_error.error}"
-        return {
-          jsonrpc: "2.0"
-          id: message.id
-          result: {
-            content: {
-              {
-                type: "text"
-                text: result_or_error.error
-              }
-            }
-            isError: true
-          }
-        }
-
-      @debug_log "success", "Tool executed successfully: #{tool_name}"
-      return {
-        jsonrpc: "2.0"
-        id: message.id
-        result: {
-          content: {
-            {
-              type: "text"
-              text: json.encode(result_or_error)
-            }
-          }
-          isError: false
-        }
-      }
-    elseif message.method == "tools/list"
-      @debug_log "info", "Listing available tools"
-      return @get_tools_list!
-    else
-      @debug_log "warning", "Unknown method: #{message.method}"
-      return {
-        jsonrpc: "2.0"
-        id: message.id
-        error: {
-          code: -32601
-          message: "Method not found: #{message.method}"
-        }
-      }
 
   -- Handle initialization message
   handle_initialize: (message) =>
@@ -297,7 +218,7 @@ class McpServer
     @initialized = true
     @debug_log "success", "Server initialized successfully with #{table.getn([k for k,v in pairs(@tools)])} tools"
 
-    return {
+    {
       jsonrpc: "2.0"
       id: message.id
       result: {
@@ -311,18 +232,99 @@ class McpServer
       }
     }
 
-  -- Get tools list response (for API and testing)
-  get_tools_list: =>
-    -- Check if server is initialized
-    unless @initialized
+  handle_tools_call: with_initialized (message) =>
+    tool_name = message.params.name
+    params = message.params.arguments or {}
+
+    @debug_log "info", "Executing tool: #{tool_name}"
+
+    unless @tools[tool_name]
       return {
         jsonrpc: "2.0"
-        error: {
-          code: -32002
-          message: "Server not initialized. Call initialize first."
+        id: message.id
+        result: {
+          content: {
+            {
+              type: "text"
+              text: "Unknown tool: #{tool_name}"
+            }
+          }
+          isError: true
         }
       }
 
+    tool = @tools[tool_name]
+
+    -- Validate required parameters
+    for param_name in *tool.inputSchema.required
+      if not params[param_name]
+        return {
+          jsonrpc: "2.0"
+          id: message.id
+          result: {
+            content: {
+              {
+                type: "text"
+                text: "Missing required parameter: #{param_name}"
+              }
+            }
+            isError: true
+          }
+        }
+
+    -- Call the tool handler
+    ok, result_or_error = pcall(tool.handler, @, params)
+
+    if not ok
+      @debug_log "error", "Tool execution failed: #{result_or_error}"
+      return {
+        jsonrpc: "2.0"
+        id: message.id
+        result: {
+          content: {
+            {
+              type: "text"
+              text: "Error executing tool: #{result_or_error}"
+            }
+          }
+          isError: true
+        }
+      }
+
+    -- Handle error result from tool
+    if result_or_error.error
+      @debug_log "warning", "Tool returned error: #{result_or_error.error}"
+      return {
+        jsonrpc: "2.0"
+        id: message.id
+        result: {
+          content: {
+            {
+              type: "text"
+              text: result_or_error.error
+            }
+          }
+          isError: true
+        }
+      }
+
+    @debug_log "success", "Tool executed successfully: #{tool_name}"
+    return {
+      jsonrpc: "2.0"
+      id: message.id
+      result: {
+        content: {
+          {
+            type: "text"
+            text: json.encode(result_or_error)
+          }
+        }
+        isError: false
+      }
+    }
+
+  -- Get tools list response (for API and testing)
+  handle_tools_list: with_initialized (message) =>
     tools_list = {}
 
     for name, tool in pairs(@tools)
@@ -335,10 +337,18 @@ class McpServer
 
     {
       jsonrpc: "2.0"
+      id: message.id
       result: {
         tools: tools_list
       }
     }
+
+  --- called to cancel a running job
+  -- {"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":1,"reason":"McpError: MCP error -32001: Request timed out"}}
+  handle_notifications_canceled: (message) =>
+    id = message.params.requestId
+    -- we ignore this now, there's nothing we can do without async tasks
+    nil
 
   -- alias for handle_message that's used for direct invocation via CLI
   send_message: (message) =>
@@ -352,11 +362,16 @@ class McpServer
     -- Process messages
     while true
       message = @read_json_chunk!
+      if message == false
+        @debug_log "info", "io closed, exiting..."
+        break
+
       unless message
         @debug_log "warning", "Malformed message received: not valid JSON, ignoring..."
         continue
 
-      response = @handle_message(message)
-      @write_json_chunk(response)
+      response = @handle_message message
+      if response
+        @write_json_chunk response
 
 {:McpServer, :StdioTransport}

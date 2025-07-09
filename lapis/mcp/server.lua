@@ -63,6 +63,22 @@ do
   _base_0.__class = _class_0
   StreamableHttpTransport = _class_0
 end
+local with_initialized
+with_initialized = function(fn)
+  return function(self, message)
+    if not (self.initialized) then
+      return {
+        jsonrpc = "2.0",
+        id = message.id,
+        error = {
+          code = -32002,
+          message = "Server not initialized. Call initialize first."
+        }
+      }
+    end
+    return fn(self, message)
+  end
+end
 local McpServer
 do
   local _class_0
@@ -190,107 +206,19 @@ do
     end,
     handle_message = function(self, message)
       self:debug_log("info", "Received message: " .. tostring(message.method))
-      if message.method == "initialize" then
+      local _exp_0 = message.method
+      if "initialize" == _exp_0 then
         return self:handle_initialize(message)
-      elseif message.method == "tools/call" then
-        if not (self.initialized) then
-          return {
-            jsonrpc = "2.0",
-            id = message.id,
-            error = {
-              code = -32002,
-              message = "Server not initialized. Call initialize first."
-            }
-          }
-        end
-        local tool_name = message.params.name
-        local params = message.params.arguments or { }
-        self:debug_log("info", "Executing tool: " .. tostring(tool_name))
-        if not (self.tools[tool_name]) then
-          return {
-            jsonrpc = "2.0",
-            id = message.id,
-            result = {
-              content = {
-                {
-                  type = "text",
-                  text = "Unknown tool: " .. tostring(tool_name)
-                }
-              },
-              isError = true
-            }
-          }
-        end
-        local tool = self.tools[tool_name]
-        local _list_0 = tool.inputSchema.required
-        for _index_0 = 1, #_list_0 do
-          local param_name = _list_0[_index_0]
-          if not params[param_name] then
-            return {
-              jsonrpc = "2.0",
-              id = message.id,
-              result = {
-                content = {
-                  {
-                    type = "text",
-                    text = "Missing required parameter: " .. tostring(param_name)
-                  }
-                },
-                isError = true
-              }
-            }
-          end
-        end
-        local ok, result_or_error = pcall(tool.handler, self, params)
-        if not ok then
-          self:debug_log("error", "Tool execution failed: " .. tostring(result_or_error))
-          return {
-            jsonrpc = "2.0",
-            id = message.id,
-            result = {
-              content = {
-                {
-                  type = "text",
-                  text = "Error executing tool: " .. tostring(result_or_error)
-                }
-              },
-              isError = true
-            }
-          }
-        end
-        if result_or_error.error then
-          self:debug_log("warning", "Tool returned error: " .. tostring(result_or_error.error))
-          return {
-            jsonrpc = "2.0",
-            id = message.id,
-            result = {
-              content = {
-                {
-                  type = "text",
-                  text = result_or_error.error
-                }
-              },
-              isError = true
-            }
-          }
-        end
-        self:debug_log("success", "Tool executed successfully: " .. tostring(tool_name))
-        return {
-          jsonrpc = "2.0",
-          id = message.id,
-          result = {
-            content = {
-              {
-                type = "text",
-                text = json.encode(result_or_error)
-              }
-            },
-            isError = false
-          }
-        }
-      elseif message.method == "tools/list" then
+      elseif "notifications/initialized" == _exp_0 then
+        self:debug_log("info", "Client notified initialized")
+        self.client_initialized = true
+      elseif "notifications/cancelled" == _exp_0 then
+        return self:handle_notifications_canceled(message)
+      elseif "tools/list" == _exp_0 then
         self:debug_log("info", "Listing available tools")
-        return self:get_tools_list()
+        return self:handle_tools_list(message)
+      elseif "tools/call" == _exp_0 then
+        return self:handle_tools_call(message)
       else
         self:debug_log("warning", "Unknown method: " .. tostring(message.method))
         return {
@@ -352,16 +280,94 @@ do
         }
       }
     end,
-    get_tools_list = function(self)
-      if not (self.initialized) then
+    handle_tools_call = with_initialized(function(self, message)
+      local tool_name = message.params.name
+      local params = message.params.arguments or { }
+      self:debug_log("info", "Executing tool: " .. tostring(tool_name))
+      if not (self.tools[tool_name]) then
         return {
           jsonrpc = "2.0",
-          error = {
-            code = -32002,
-            message = "Server not initialized. Call initialize first."
+          id = message.id,
+          result = {
+            content = {
+              {
+                type = "text",
+                text = "Unknown tool: " .. tostring(tool_name)
+              }
+            },
+            isError = true
           }
         }
       end
+      local tool = self.tools[tool_name]
+      local _list_0 = tool.inputSchema.required
+      for _index_0 = 1, #_list_0 do
+        local param_name = _list_0[_index_0]
+        if not params[param_name] then
+          return {
+            jsonrpc = "2.0",
+            id = message.id,
+            result = {
+              content = {
+                {
+                  type = "text",
+                  text = "Missing required parameter: " .. tostring(param_name)
+                }
+              },
+              isError = true
+            }
+          }
+        end
+      end
+      local ok, result_or_error = pcall(tool.handler, self, params)
+      if not ok then
+        self:debug_log("error", "Tool execution failed: " .. tostring(result_or_error))
+        return {
+          jsonrpc = "2.0",
+          id = message.id,
+          result = {
+            content = {
+              {
+                type = "text",
+                text = "Error executing tool: " .. tostring(result_or_error)
+              }
+            },
+            isError = true
+          }
+        }
+      end
+      if result_or_error.error then
+        self:debug_log("warning", "Tool returned error: " .. tostring(result_or_error.error))
+        return {
+          jsonrpc = "2.0",
+          id = message.id,
+          result = {
+            content = {
+              {
+                type = "text",
+                text = result_or_error.error
+              }
+            },
+            isError = true
+          }
+        }
+      end
+      self:debug_log("success", "Tool executed successfully: " .. tostring(tool_name))
+      return {
+        jsonrpc = "2.0",
+        id = message.id,
+        result = {
+          content = {
+            {
+              type = "text",
+              text = json.encode(result_or_error)
+            }
+          },
+          isError = false
+        }
+      }
+    end),
+    handle_tools_list = with_initialized(function(self, message)
       local tools_list = { }
       for name, tool in pairs(self.tools) do
         insert(tools_list, {
@@ -373,10 +379,15 @@ do
       end
       return {
         jsonrpc = "2.0",
+        id = message.id,
         result = {
           tools = tools_list
         }
       }
+    end),
+    handle_notifications_canceled = function(self, message)
+      local id = message.params.requestId
+      return nil
     end,
     send_message = function(self, message)
       return self:handle_message(message)
@@ -388,13 +399,19 @@ do
         local _continue_0 = false
         repeat
           local message = self:read_json_chunk()
+          if message == false then
+            self:debug_log("info", "io closed, exiting...")
+            break
+          end
           if not (message) then
             self:debug_log("warning", "Malformed message received: not valid JSON, ignoring...")
             _continue_0 = true
             break
           end
           local response = self:handle_message(message)
-          self:write_json_chunk(response)
+          if response then
+            self:write_json_chunk(response)
+          end
           _continue_0 = true
         until true
         if not _continue_0 then
