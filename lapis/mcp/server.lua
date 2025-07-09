@@ -124,7 +124,19 @@ do
       return { }
     end,
     handle_message = function(self, message)
-      if message.method == "tools/call" then
+      if message.method == "initialize" then
+        return self:handle_initialize(message)
+      elseif message.method == "tools/call" then
+        if not (self.initialized) then
+          return {
+            jsonrpc = "2.0",
+            id = message.id,
+            error = {
+              code = -32002,
+              message = "Server not initialized. Call initialize first."
+            }
+          }
+        end
         local tool_name = message.params.name
         local params = message.params.arguments or { }
         if not (self.tools[tool_name]) then
@@ -219,7 +231,51 @@ do
         }
       end
     end,
+    handle_initialize = function(self, message)
+      local params = message.params or { }
+      local client_info = params.clientInfo or { }
+      local client_capabilities = params.capabilities or { }
+      local requested_version = params.protocolVersion or "2025-06-18"
+      self.client_capabilities = client_capabilities
+      if requested_version ~= self.protocol_version then
+        return {
+          jsonrpc = "2.0",
+          id = message.id,
+          error = {
+            code = -32602,
+            message = "Protocol version mismatch. Server supports: " .. tostring(self.protocol_version) .. ", client requested: " .. tostring(requested_version)
+          }
+        }
+      end
+      self.server_capabilities.tools = { }
+      for name, tool in pairs(self.tools) do
+        self.server_capabilities.tools[name] = true
+      end
+      self.initialized = true
+      return {
+        jsonrpc = "2.0",
+        id = message.id,
+        result = {
+          protocolVersion = self.protocol_version,
+          capabilities = self.server_capabilities,
+          serverInfo = {
+            name = "lapis-mcp",
+            version = "0.1.0",
+            vendor = "Lapis"
+          }
+        }
+      }
+    end,
     get_tools_list = function(self)
+      if not (self.initialized) then
+        return {
+          jsonrpc = "2.0",
+          error = {
+            code = -32002,
+            message = "Server not initialized. Call initialize first."
+          }
+        }
+      end
       local tools_list = { }
       for name, tool in pairs(self.tools) do
         insert(tools_list, {
@@ -251,7 +307,6 @@ do
       return response
     end,
     run = function(self)
-      self:write_json_chunk(self:get_server_info())
       while true do
         local message = self:read_json_chunk()
         if not (message) then
@@ -266,7 +321,13 @@ do
   _class_0 = setmetatable({
     __init = function(self, app)
       self.app = app
-      return self:setup_tools()
+      self:setup_tools()
+      self.protocol_version = "2025-06-18"
+      self.server_capabilities = {
+        tools = { }
+      }
+      self.client_capabilities = { }
+      self.initialized = false
     end,
     __base = _base_0,
     __name = "McpServer"

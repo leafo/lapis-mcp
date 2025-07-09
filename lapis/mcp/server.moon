@@ -7,6 +7,12 @@ import insert from table
 class McpServer
   new: (@app) =>
     @setup_tools!
+    @protocol_version = "2025-06-18"
+    @server_capabilities = {
+      tools: {}
+    }
+    @client_capabilities = {}
+    @initialized = false
 
   -- Setup available tools
   setup_tools: =>
@@ -112,7 +118,20 @@ class McpServer
 
   -- Message handler
   handle_message: (message) =>
-    if message.method == "tools/call"
+    if message.method == "initialize"
+      return @handle_initialize(message)
+    elseif message.method == "tools/call"
+      -- Check if server is initialized
+      unless @initialized
+        return {
+          jsonrpc: "2.0"
+          id: message.id
+          error: {
+            code: -32002
+            message: "Server not initialized. Call initialize first."
+          }
+        }
+
       tool_name = message.params.name
       params = message.params.arguments or {}
 
@@ -209,8 +228,62 @@ class McpServer
         }
       }
 
+  -- Handle initialization message
+  handle_initialize: (message) =>
+    params = message.params or {}
+
+    -- Extract client info
+    client_info = params.clientInfo or {}
+    client_capabilities = params.capabilities or {}
+    requested_version = params.protocolVersion or "2025-06-18"
+
+    -- Store client capabilities
+    @client_capabilities = client_capabilities
+
+    -- Check protocol version compatibility
+    if requested_version != @protocol_version
+      return {
+        jsonrpc: "2.0"
+        id: message.id
+        error: {
+          code: -32602
+          message: "Protocol version mismatch. Server supports: #{@protocol_version}, client requested: #{requested_version}"
+        }
+      }
+
+    -- Set up server capabilities based on available tools
+    @server_capabilities.tools = {}
+    for name, tool in pairs(@tools)
+      @server_capabilities.tools[name] = true
+
+    @initialized = true
+
+    return {
+      jsonrpc: "2.0"
+      id: message.id
+      result: {
+        protocolVersion: @protocol_version
+        capabilities: @server_capabilities
+        serverInfo: {
+          name: "lapis-mcp"
+          version: "0.1.0"
+          vendor: "Lapis"
+        }
+      }
+    }
+
   -- Get tools list response (for API and testing)
   get_tools_list: =>
+    -- Check if server is initialized
+    unless @initialized
+      return {
+        jsonrpc: "2.0"
+        error: {
+          code: -32002
+          message: "Server not initialized. Call initialize first."
+        }
+      }
+
     tools_list = {}
 
     for name, tool in pairs(@tools)
@@ -246,9 +319,6 @@ class McpServer
 
   -- Server main loop
   run: =>
-    -- Send server info
-    @write_json_chunk(@get_server_info!)
-
     -- Process messages
     while true
       message = @read_json_chunk!
