@@ -164,7 +164,27 @@ do
             required = json.empty_array
           },
           handler = function(self, params)
-            return self:list_routes()
+            local routes = { }
+            assert(self.app, "Missing app class")
+            local router = self.app().router
+            router:build()
+            local tuples
+            do
+              local _accum_0 = { }
+              local _len_0 = 1
+              for k, v in pairs(router.named_routes) do
+                _accum_0[_len_0] = {
+                  k,
+                  v
+                }
+                _len_0 = _len_0 + 1
+              end
+              tuples = _accum_0
+            end
+            table.sort(tuples, function(a, b)
+              return a[1] < b[1]
+            end)
+            return tuples
           end
         },
         models = {
@@ -177,7 +197,9 @@ do
             required = json.empty_array
           },
           handler = function(self, params)
-            return self:list_models()
+            local models = { }
+            error("not implemented yet")
+            return models
           end
         },
         schema = {
@@ -197,59 +219,25 @@ do
             }
           },
           handler = function(self, params)
-            local schema, err = self:get_model_schema(params.model_name)
-            if not schema then
-              return {
-                error = err
-              }
+            local model_name = params.model_name
+            local ok, db = pcall(require, "models")
+            if not ok or type(db) ~= "table" or not db[model_name] then
+              return nil, "Model not found: " .. tostring(model_name)
             end
-            return schema
+            local model = db[model_name]
+            return error("not implemented yet")
           end
         }
       }
+    end,
+    find_tool = function(self, name)
+      return self.tools[name]
     end,
     read_json_chunk = function(self)
       return self.transport:read_json_chunk()
     end,
     write_json_chunk = function(self, obj)
       return self.transport:write_json_chunk(obj)
-    end,
-    list_routes = function(self)
-      local routes = { }
-      assert(self.app, "Missing app class")
-      local router = self.app().router
-      router:build()
-      local tuples
-      do
-        local _accum_0 = { }
-        local _len_0 = 1
-        for k, v in pairs(router.named_routes) do
-          _accum_0[_len_0] = {
-            k,
-            v
-          }
-          _len_0 = _len_0 + 1
-        end
-        tuples = _accum_0
-      end
-      table.sort(tuples, function(a, b)
-        return a[1] < b[1]
-      end)
-      return tuples
-    end,
-    list_models = function(self)
-      local models = { }
-      error("not implemented yet")
-      return models
-    end,
-    get_model_schema = function(self, model_name)
-      local ok, db = pcall(require, "models")
-      if not ok or type(db) ~= "table" or not db[model_name] then
-        return nil, "Model not found: " .. tostring(model_name)
-      end
-      local model = db[model_name]
-      error("TODO")
-      return { }
     end,
     handle_message = function(self, message)
       self:debug_log("info", "Received message: " .. tostring(message.method))
@@ -331,7 +319,8 @@ do
       local tool_name = message.params.name
       local params = message.params.arguments or { }
       self:debug_log("info", "Executing tool: " .. tostring(tool_name))
-      if not (self.tools[tool_name]) then
+      local tool = self:find_tool(tool_name)
+      if not (tool) then
         return {
           jsonrpc = "2.0",
           id = message.id,
@@ -346,7 +335,6 @@ do
           }
         }
       end
-      local tool = self.tools[tool_name]
       if type(tool.inputSchema.required) == "table" then
         local _list_0 = tool.inputSchema.required
         for _index_0 = 1, #_list_0 do
@@ -368,7 +356,7 @@ do
           end
         end
       end
-      local ok, result_or_error = pcall(tool.handler, self, params)
+      local ok, result_or_error, user_error = pcall(tool.handler, self, params)
       if not ok then
         self:debug_log("error", "Tool execution failed: " .. tostring(result_or_error))
         return {
@@ -385,8 +373,8 @@ do
           }
         }
       end
-      if result_or_error.error then
-        self:debug_log("warning", "Tool returned error: " .. tostring(result_or_error.error))
+      if result_or_error == nil then
+        self:debug_log("warning", "Tool returned error: " .. tostring(user_error or "Unknown error"))
         return {
           jsonrpc = "2.0",
           id = message.id,
@@ -394,7 +382,7 @@ do
             content = {
               {
                 type = "text",
-                text = result_or_error.error
+                text = "Error executing tool: " .. tostring(user_error or "Unknown error")
               }
             },
             isError = true

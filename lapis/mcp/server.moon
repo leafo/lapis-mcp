@@ -115,7 +115,15 @@ class McpServer
           required: json.empty_array
         }
         handler: (params) =>
-          @list_routes!
+          routes = {}
+          assert @app, "Missing app class"
+          router = @.app!.router
+          router\build!
+
+          tuples = [{k,v} for k,v in pairs router.named_routes]
+          table.sort tuples, (a,b) -> a[1] < b[1]
+
+          tuples
       }
 
       models: {
@@ -128,7 +136,9 @@ class McpServer
           required: json.empty_array
         }
         handler: (params) =>
-          @list_models!
+          models = {}
+          error("not implemented yet")
+          models
       }
 
       schema: {
@@ -146,14 +156,19 @@ class McpServer
           required: {"model_name"}
         }
         handler: (params) =>
-          schema, err = @get_model_schema(params.model_name)
-          if not schema
-            return {
-              error: err
-            }
-          schema
+          model_name = params.model_name
+
+          ok, db = pcall(require, "models")
+          if not ok or type(db) != "table" or not db[model_name]
+            return nil, "Model not found: #{model_name}"
+
+          model = db[model_name]
+          error "not implemented yet"
       }
     }
+
+  find_tool: (name) =>
+    @tools[name]
 
   -- IO and message handling
   read_json_chunk: =>
@@ -161,34 +176,6 @@ class McpServer
 
   write_json_chunk: (obj) =>
     @transport\write_json_chunk obj
-
-  -- Tool implementations
-  list_routes: =>
-    routes = {}
-    assert @app, "Missing app class"
-    router = @.app!.router
-    router\build!
-
-    tuples = [{k,v} for k,v in pairs router.named_routes]
-    table.sort tuples, (a,b) -> a[1] < b[1]
-
-    tuples
-
-  list_models: =>
-    models = {}
-    error("not implemented yet")
-    return models
-
-  get_model_schema: (model_name) =>
-    -- Try to load the model
-    ok, db = pcall(require, "models")
-    if not ok or type(db) != "table" or not db[model_name]
-      return nil, "Model not found: #{model_name}"
-
-    model = db[model_name]
-
-    error "TODO"
-    return {}
 
   -- Message handler
   handle_message: (message) =>
@@ -274,7 +261,9 @@ class McpServer
 
     @debug_log "info", "Executing tool: #{tool_name}"
 
-    unless @tools[tool_name]
+    tool = @find_tool tool_name
+
+    unless tool
       return {
         jsonrpc: "2.0"
         id: message.id
@@ -288,8 +277,6 @@ class McpServer
           isError: true
         }
       }
-
-    tool = @tools[tool_name]
 
     -- Validate required parameters
     -- it might not be a table if it's json.empty_array
@@ -311,7 +298,7 @@ class McpServer
           }
 
     -- Call the tool handler
-    ok, result_or_error = pcall(tool.handler, @, params)
+    ok, result_or_error, user_error = pcall(tool.handler, @, params)
 
     if not ok
       @debug_log "error", "Tool execution failed: #{result_or_error}"
@@ -329,9 +316,9 @@ class McpServer
         }
       }
 
-    -- Handle error result from tool
-    if result_or_error.error
-      @debug_log "warning", "Tool returned error: #{result_or_error.error}"
+    -- wrap nil, err into object
+    if result_or_error == nil
+      @debug_log "warning", "Tool returned error: #{user_error or "Unknown error"}"
       return {
         jsonrpc: "2.0"
         id: message.id
@@ -339,7 +326,7 @@ class McpServer
           content: {
             {
               type: "text"
-              text: result_or_error.error
+              text: "Error executing tool: #{user_error or "Unknown error"}"
             }
           }
           isError: true

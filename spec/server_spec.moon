@@ -1,4 +1,4 @@
-import McpServer from require "lapis.mcp.server"
+import McpServer, StdioTransport from require "lapis.mcp.server"
 
 describe "McpServer", ->
   local mock_app, server
@@ -20,6 +20,7 @@ describe "McpServer", ->
       assert.is_not_nil server
       assert.equal "2025-06-18", server.protocol_version
       assert.is_false server.initialized
+      assert.is_false server.debug
       assert.is_table server.tools
       assert.is_table server.server_capabilities
       assert.is_table server.client_capabilities
@@ -295,6 +296,19 @@ describe "McpServer", ->
       assert.is_nil response
       assert.is_true server.client_initialized
 
+      -- Test notifications/cancelled
+      cancel_message = {
+        jsonrpc: "2.0"
+        method: "notifications/cancelled"
+        params: {
+          requestId: 1
+          reason: "Test cancellation"
+        }
+      }
+
+      response = server\handle_message(cancel_message)
+      assert.is_nil response
+
     it "should handle unknown methods", ->
       message = {
         jsonrpc: "2.0"
@@ -310,9 +324,42 @@ describe "McpServer", ->
       assert.equal -32601, response.error.code
       assert.matches "Method not found", response.error.message
 
-  describe "list_routes", ->
-    it "should extract routes from app", ->
-      routes = server\list_routes!
+  describe "routes tool", ->
+    it "should extract routes from app via full tool call", ->
+      -- Initialize server first
+      init_message = {
+        jsonrpc: "2.0"
+        id: 1
+        method: "initialize"
+        params: {
+          protocolVersion: "2025-06-18"
+        }
+      }
+      server\handle_initialize(init_message)
+
+      -- Call routes tool through the full MCP flow
+      call_message = {
+        jsonrpc: "2.0"
+        id: 2
+        method: "tools/call"
+        params: {
+          name: "routes"
+          arguments: {}
+        }
+      }
+
+      response = server\handle_tools_call(call_message)
+
+      assert.equal "2.0", response.jsonrpc
+      assert.equal 2, response.id
+      assert.is_table response.result
+      assert.is_false response.result.isError
+      assert.is_table response.result.content
+      assert.equal "text", response.result.content[1].type
+
+      -- Parse the JSON response to check the actual routes
+      json = require "cjson.safe"
+      routes = json.decode(response.result.content[1].text)
 
       assert.is_table routes
       assert.equal 3, #routes
