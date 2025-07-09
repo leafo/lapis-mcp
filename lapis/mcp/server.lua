@@ -292,16 +292,6 @@ do
         }
       }
     end,
-    get_server_info = function(self)
-      return {
-        type = "server_info",
-        server = {
-          name = "lapis-mcp",
-          version = "0.1.0",
-          vendor = "Lapis"
-        }
-      }
-    end,
     send_message = function(self, message)
       local response = self:handle_message(message)
       return response

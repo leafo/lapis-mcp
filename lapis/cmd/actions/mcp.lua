@@ -8,7 +8,7 @@ return {
   argparser = function()
     do
       local _with_0 = require("argparse")("lapis mcp", "Run an MCP server over stdin/out that can communicate with details of Lapis app")
-      _with_0:option("--send-message", "Send a raw message by name and exit (e.g. tools/list, initialize, server_info)")
+      _with_0:option("--send-message", "Send a raw message by name and exit (e.g. tools/list, initialize)")
       _with_0:option("--tool", "Immediately invoke a tool, print output and exit (e.g. routes, models, schema)")
       return _with_0
     end
@@ -55,10 +55,6 @@ return {
       return 
     elseif args.send_message then
       local message_type = args.send_message
-      if message_type == "server_info" then
-        print(json.encode(server:get_server_info()))
-        return 
-      end
       local init_message = {
         jsonrpc = "2.0",
         id = "init-" .. tostring(os.time()),

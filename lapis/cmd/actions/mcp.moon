@@ -5,7 +5,7 @@ json = require "cjson"
 {
   argparser: ->
     with require("argparse") "lapis mcp", "Run an MCP server over stdin/out that can communicate with details of Lapis app"
-      \option "--send-message", "Send a raw message by name and exit (e.g. tools/list, initialize, server_info)"
+      \option "--send-message", "Send a raw message by name and exit (e.g. tools/list, initialize)"
       \option "--tool", "Immediately invoke a tool, print output and exit (e.g. routes, models, schema)"
 
   (args, lapis_args) =>
@@ -63,12 +63,7 @@ json = require "cjson"
     elseif args.send_message
       message_type = args.send_message
 
-      -- Handle special cases that don't require initialization
-      if message_type == "server_info"
-        print json.encode(server\get_server_info!)
-        return
-
-      -- For all other messages, initialize first
+      -- Initialize first for all messages
       init_message = {
         jsonrpc: "2.0"
         id: "init-#{os.time!}"

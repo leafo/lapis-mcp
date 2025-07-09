@@ -301,16 +301,6 @@ class McpServer
       }
     }
 
-  -- Server info response
-  get_server_info: =>
-    {
-      type: "server_info"
-      server: {
-        name: "lapis-mcp"
-        version: "0.1.0"
-        vendor: "Lapis"
-      }
-    }
 
   -- Send a single message and get response
   send_message: (message) =>
