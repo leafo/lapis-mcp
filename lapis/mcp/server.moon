@@ -74,6 +74,10 @@ with_initialized = (fn) ->
     fn @, message
 
 class McpServer
+  @server_name: "lapis-mcp"
+  @server_version: "1.0.0"
+  @server_vendor: "Lapis"
+
   new: (@app, @debug = false) =>
     @setup_tools!
     @protocol_version = "2025-06-18"
@@ -257,9 +261,9 @@ class McpServer
         protocolVersion: @protocol_version
         capabilities: @server_capabilities
         serverInfo: {
-          name: "lapis-mcp"
-          version: "0.1.0"
-          vendor: "Lapis"
+          name: @@server_name
+          version: @@server_version
+          vendor: @@server_vendor
         }
       }
     }

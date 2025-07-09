@@ -320,9 +320,9 @@ do
           protocolVersion = self.protocol_version,
           capabilities = self.server_capabilities,
           serverInfo = {
-            name = "lapis-mcp",
-            version = "0.1.0",
-            vendor = "Lapis"
+            name = self.__class.server_name,
+            version = self.__class.server_version,
+            vendor = self.__class.server_vendor
           }
         }
       }
@@ -495,6 +495,10 @@ do
     end
   })
   _base_0.__class = _class_0
+  local self = _class_0
+  self.server_name = "lapis-mcp"
+  self.server_version = "1.0.0"
+  self.server_vendor = "Lapis"
   McpServer = _class_0
 end
 return {
