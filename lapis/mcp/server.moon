@@ -1,11 +1,34 @@
-json = require "cjson"
+json = require "cjson.safe"
+colors = require "ansicolors"
 import insert from table
 
 -- MCP server implementation for Lapis
 -- Follows Model Context Protocol spec: https://modelcontextprotocol.io/
 
+class StdioTransport
+  -- IO and message handling
+  read_json_chunk: =>
+    chunk = io.read "*l"
+    message = json.decode(chunk)
+    unless message
+      return nil, "Failed to decode JSON chunk"
+
+    message
+
+  write_json_chunk: (obj) =>
+    data = assert json.encode(obj)
+    io.write data .. "\n"
+    io.flush!
+
+class StreamableHttpTransport
+  read_json_chunk: =>
+    error "TODO"
+
+  write_json_chunk: =>
+    error "TODO"
+
 class McpServer
-  new: (@app) =>
+  new: (@app, @debug = false) =>
     @setup_tools!
     @protocol_version = "2025-06-18"
     @server_capabilities = {
@@ -13,6 +36,21 @@ class McpServer
     }
     @client_capabilities = {}
     @initialized = false
+
+  -- Debug logging helper
+  debug_log: (level, message) =>
+    return unless @debug
+
+    color = switch level
+      when "info" then "%{cyan}"
+      when "success" then "%{green}"
+      when "warning" then "%{yellow}"
+      when "error" then "%{red}"
+      when "debug" then "%{dim white}"
+      else "%{white}"
+
+    timestamp = os.date("%H:%M:%S")
+    io.stderr\write colors "#{color}[#{timestamp}] #{level\upper!}: #{message}%{reset}\n"
 
   -- Setup available tools
   setup_tools: =>
@@ -69,24 +107,10 @@ class McpServer
 
   -- IO and message handling
   read_json_chunk: =>
-    size_line = io.read("*line")
-    return nil unless size_line
-    size = tonumber(size_line)
-    return nil unless size
-
-    chunk = io.read(size)
-    return nil unless chunk
-
-    delimiter = io.read(1)
-    return nil unless delimiter == "\n"
-
-    json.decode(chunk)
+    @transport\read_json_chunk!
 
   write_json_chunk: (obj) =>
-    data = json.encode(obj)
-    io.write(#data .. "\n")
-    io.write(data .. "\n")
-    io.flush()
+    @transport\write_json_chunk obj
 
   -- Tool implementations
   list_routes: =>
@@ -118,6 +142,8 @@ class McpServer
 
   -- Message handler
   handle_message: (message) =>
+    @debug_log "info", "Received message: #{message.method}"
+
     if message.method == "initialize"
       return @handle_initialize(message)
     elseif message.method == "tools/call"
@@ -134,6 +160,8 @@ class McpServer
 
       tool_name = message.params.name
       params = message.params.arguments or {}
+
+      @debug_log "info", "Executing tool: #{tool_name}"
 
       unless @tools[tool_name]
         return {
@@ -173,6 +201,7 @@ class McpServer
       ok, result_or_error = pcall(tool.handler, @, params)
 
       if not ok
+        @debug_log "error", "Tool execution failed: #{result_or_error}"
         return {
           jsonrpc: "2.0"
           id: message.id
@@ -189,6 +218,7 @@ class McpServer
 
       -- Handle error result from tool
       if result_or_error.error
+        @debug_log "warning", "Tool returned error: #{result_or_error.error}"
         return {
           jsonrpc: "2.0"
           id: message.id
@@ -203,6 +233,7 @@ class McpServer
           }
         }
 
+      @debug_log "success", "Tool executed successfully: #{tool_name}"
       return {
         jsonrpc: "2.0"
         id: message.id
@@ -217,8 +248,10 @@ class McpServer
         }
       }
     elseif message.method == "tools/list"
+      @debug_log "info", "Listing available tools"
       return @get_tools_list!
     else
+      @debug_log "warning", "Unknown method: #{message.method}"
       return {
         jsonrpc: "2.0"
         id: message.id
@@ -237,11 +270,16 @@ class McpServer
     client_capabilities = params.capabilities or {}
     requested_version = params.protocolVersion or "2025-06-18"
 
+    @debug_log "info", "Initializing server with protocol version: #{requested_version}"
+    if client_info.name
+      @debug_log "debug", "Client: #{client_info.name} v#{client_info.version or 'unknown'}"
+
     -- Store client capabilities
     @client_capabilities = client_capabilities
 
     -- Check protocol version compatibility
     if requested_version != @protocol_version
+      @debug_log "error", "Protocol version mismatch: server=#{@protocol_version}, client=#{requested_version}"
       return {
         jsonrpc: "2.0"
         id: message.id
@@ -257,6 +295,7 @@ class McpServer
       @server_capabilities.tools[name] = true
 
     @initialized = true
+    @debug_log "success", "Server initialized successfully with #{table.getn([k for k,v in pairs(@tools)])} tools"
 
     return {
       jsonrpc: "2.0"
@@ -301,38 +340,23 @@ class McpServer
       }
     }
 
-
-  -- Send a single message and get response
+  -- alias for handle_message that's used for direct invocation via CLI
   send_message: (message) =>
-    response = @handle_message(message)
-    return response
+    @handle_message message
 
   -- Server main loop
-  run: =>
+  run_stdio: =>
+    @debug_log "info", "Starting MCP server in stdio mode, waiting for initialization..."
+    @transport = StdioTransport!
+
     -- Process messages
     while true
       message = @read_json_chunk!
-      break unless message
+      unless message
+        @debug_log "warning", "Malformed message received: not valid JSON, ignoring..."
+        continue
 
       response = @handle_message(message)
       @write_json_chunk(response)
 
--- Helper functions outside the class
-find_lapis_application = (config) ->
-  -- Try to load the main application module
-  app_module = "app"
-  if config and config.app_module
-    app_module = config.app_module
-
-  ok, app = pcall(require, app_module)
-  if ok
-    return app
-
-  -- Fall back to loading a default Lapis application
-  ok, lapis = pcall(require, "lapis")
-  if ok
-    return lapis.Application()
-
-  error("Could not find a Lapis application")
-
-{:McpServer, :find_lapis_application}
+{:McpServer, :StdioTransport}

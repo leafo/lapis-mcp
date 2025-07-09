@@ -1,10 +1,94 @@
-local json = require("cjson")
+local json = require("cjson.safe")
+local colors = require("ansicolors")
 local insert
 insert = table.insert
+local StdioTransport
+do
+  local _class_0
+  local _base_0 = {
+    read_json_chunk = function(self)
+      local chunk = io.read("*l")
+      local message = json.decode(chunk)
+      if not (message) then
+        return nil, "Failed to decode JSON chunk"
+      end
+      return message
+    end,
+    write_json_chunk = function(self, obj)
+      local data = assert(json.encode(obj))
+      io.write(data .. "\n")
+      return io.flush()
+    end
+  }
+  _base_0.__index = _base_0
+  _class_0 = setmetatable({
+    __init = function() end,
+    __base = _base_0,
+    __name = "StdioTransport"
+  }, {
+    __index = _base_0,
+    __call = function(cls, ...)
+      local _self_0 = setmetatable({}, _base_0)
+      cls.__init(_self_0, ...)
+      return _self_0
+    end
+  })
+  _base_0.__class = _class_0
+  StdioTransport = _class_0
+end
+local StreamableHttpTransport
+do
+  local _class_0
+  local _base_0 = {
+    read_json_chunk = function(self)
+      return error("TODO")
+    end,
+    write_json_chunk = function(self)
+      return error("TODO")
+    end
+  }
+  _base_0.__index = _base_0
+  _class_0 = setmetatable({
+    __init = function() end,
+    __base = _base_0,
+    __name = "StreamableHttpTransport"
+  }, {
+    __index = _base_0,
+    __call = function(cls, ...)
+      local _self_0 = setmetatable({}, _base_0)
+      cls.__init(_self_0, ...)
+      return _self_0
+    end
+  })
+  _base_0.__class = _class_0
+  StreamableHttpTransport = _class_0
+end
 local McpServer
 do
   local _class_0
   local _base_0 = {
+    debug_log = function(self, level, message)
+      if not (self.debug) then
+        return 
+      end
+      local color
+      local _exp_0 = level
+      if "info" == _exp_0 then
+        color = "%{cyan}"
+      elseif "success" == _exp_0 then
+        color = "%{green}"
+      elseif "warning" == _exp_0 then
+        color = "%{yellow}"
+      elseif "error" == _exp_0 then
+        color = "%{red}"
+      elseif "debug" == _exp_0 then
+        color = "%{dim white}"
+      else
+        color = "%{white}"
+      end
+      local timestamp = os.date("%H:%M:%S")
+      return io.stderr:write(colors(tostring(color) .. "[" .. tostring(timestamp) .. "] " .. tostring(level:upper()) .. ": " .. tostring(message) .. "%{reset}\n"))
+    end,
     setup_tools = function(self)
       self.tools = {
         routes = {
@@ -62,29 +146,10 @@ do
       }
     end,
     read_json_chunk = function(self)
-      local size_line = io.read("*line")
-      if not (size_line) then
-        return nil
-      end
-      local size = tonumber(size_line)
-      if not (size) then
-        return nil
-      end
-      local chunk = io.read(size)
-      if not (chunk) then
-        return nil
-      end
-      local delimiter = io.read(1)
-      if not (delimiter == "\n") then
-        return nil
-      end
-      return json.decode(chunk)
+      return self.transport:read_json_chunk()
     end,
     write_json_chunk = function(self, obj)
-      local data = json.encode(obj)
-      io.write(#data .. "\n")
-      io.write(data .. "\n")
-      return io.flush()
+      return self.transport:write_json_chunk(obj)
     end,
     list_routes = function(self)
       local routes = { }
@@ -124,6 +189,7 @@ do
       return { }
     end,
     handle_message = function(self, message)
+      self:debug_log("info", "Received message: " .. tostring(message.method))
       if message.method == "initialize" then
         return self:handle_initialize(message)
       elseif message.method == "tools/call" then
@@ -139,6 +205,7 @@ do
         end
         local tool_name = message.params.name
         local params = message.params.arguments or { }
+        self:debug_log("info", "Executing tool: " .. tostring(tool_name))
         if not (self.tools[tool_name]) then
           return {
             jsonrpc = "2.0",
@@ -176,6 +243,7 @@ do
         end
         local ok, result_or_error = pcall(tool.handler, self, params)
         if not ok then
+          self:debug_log("error", "Tool execution failed: " .. tostring(result_or_error))
           return {
             jsonrpc = "2.0",
             id = message.id,
@@ -191,6 +259,7 @@ do
           }
         end
         if result_or_error.error then
+          self:debug_log("warning", "Tool returned error: " .. tostring(result_or_error.error))
           return {
             jsonrpc = "2.0",
             id = message.id,
@@ -205,6 +274,7 @@ do
             }
           }
         end
+        self:debug_log("success", "Tool executed successfully: " .. tostring(tool_name))
         return {
           jsonrpc = "2.0",
           id = message.id,
@@ -219,8 +289,10 @@ do
           }
         }
       elseif message.method == "tools/list" then
+        self:debug_log("info", "Listing available tools")
         return self:get_tools_list()
       else
+        self:debug_log("warning", "Unknown method: " .. tostring(message.method))
         return {
           jsonrpc = "2.0",
           id = message.id,
@@ -236,8 +308,13 @@ do
       local client_info = params.clientInfo or { }
       local client_capabilities = params.capabilities or { }
       local requested_version = params.protocolVersion or "2025-06-18"
+      self:debug_log("info", "Initializing server with protocol version: " .. tostring(requested_version))
+      if client_info.name then
+        self:debug_log("debug", "Client: " .. tostring(client_info.name) .. " v" .. tostring(client_info.version or 'unknown'))
+      end
       self.client_capabilities = client_capabilities
       if requested_version ~= self.protocol_version then
+        self:debug_log("error", "Protocol version mismatch: server=" .. tostring(self.protocol_version) .. ", client=" .. tostring(requested_version))
         return {
           jsonrpc = "2.0",
           id = message.id,
@@ -252,6 +329,15 @@ do
         self.server_capabilities.tools[name] = true
       end
       self.initialized = true
+      self:debug_log("success", "Server initialized successfully with " .. tostring(table.getn((function()
+        local _accum_0 = { }
+        local _len_0 = 1
+        for k, v in pairs(self.tools) do
+          _accum_0[_len_0] = k
+          _len_0 = _len_0 + 1
+        end
+        return _accum_0
+      end)())) .. " tools")
       return {
         jsonrpc = "2.0",
         id = message.id,
@@ -293,24 +379,37 @@ do
       }
     end,
     send_message = function(self, message)
-      local response = self:handle_message(message)
-      return response
+      return self:handle_message(message)
     end,
-    run = function(self)
+    run_stdio = function(self)
+      self:debug_log("info", "Starting MCP server in stdio mode, waiting for initialization...")
+      self.transport = StdioTransport()
       while true do
-        local message = self:read_json_chunk()
-        if not (message) then
+        local _continue_0 = false
+        repeat
+          local message = self:read_json_chunk()
+          if not (message) then
+            self:debug_log("warning", "Malformed message received: not valid JSON, ignoring...")
+            _continue_0 = true
+            break
+          end
+          local response = self:handle_message(message)
+          self:write_json_chunk(response)
+          _continue_0 = true
+        until true
+        if not _continue_0 then
           break
         end
-        local response = self:handle_message(message)
-        self:write_json_chunk(response)
       end
     end
   }
   _base_0.__index = _base_0
   _class_0 = setmetatable({
-    __init = function(self, app)
-      self.app = app
+    __init = function(self, app, debug)
+      if debug == nil then
+        debug = false
+      end
+      self.app, self.debug = app, debug
       self:setup_tools()
       self.protocol_version = "2025-06-18"
       self.server_capabilities = {
@@ -332,24 +431,7 @@ do
   _base_0.__class = _class_0
   McpServer = _class_0
 end
-local find_lapis_application
-find_lapis_application = function(config)
-  local app_module = "app"
-  if config and config.app_module then
-    app_module = config.app_module
-  end
-  local ok, app = pcall(require, app_module)
-  if ok then
-    return app
-  end
-  local lapis
-  ok, lapis = pcall(require, "lapis")
-  if ok then
-    return lapis.Application()
-  end
-  return error("Could not find a Lapis application")
-end
 return {
   McpServer = McpServer,
-  find_lapis_application = find_lapis_application
+  StdioTransport = StdioTransport
 }
