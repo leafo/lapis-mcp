@@ -9,7 +9,10 @@ class StdioTransport
   -- IO and message handling
   read_json_chunk: =>
     chunk = io.read "*l"
-    message = json.decode(chunk)
+    unless chunk
+      return false
+
+    message = json.decode chunk
     unless message
       return nil, "Failed to decode JSON chunk"
 
@@ -17,6 +20,35 @@ class StdioTransport
 
   write_json_chunk: (obj) =>
     data = assert json.encode(obj)
+    io.write data .. "\n"
+    io.flush!
+
+class StdioTransportWithDebugLog
+  new: =>
+    @file_log = io.open "/tmp/lapis-mcp.log", "a"
+    @file_log\write "START SESSION: " .. os.date("%Y-%m-%d %H:%M:%S") .. "\n"
+
+  -- IO and message handling
+  read_json_chunk: =>
+    chunk = io.read "*l"
+    unless chunk
+      return false
+
+    @file_log\write "READ: " .. chunk .. "\n"
+    @file_log\flush!
+
+    message = json.decode chunk
+    unless message
+      return nil, "Failed to decode JSON chunk"
+
+    message
+
+  write_json_chunk: (obj) =>
+    data = assert json.encode(obj)
+
+    @file_log\write "WRITE: " .. data .. "\n"
+    @file_log\flush!
+
     io.write data .. "\n"
     io.flush!
 
@@ -76,7 +108,7 @@ class McpServer
         inputSchema: {
           type: "object"
           properties: {}
-          required: {}
+          required: json.empty_array
         }
         handler: (params) =>
           @list_routes!
@@ -89,7 +121,7 @@ class McpServer
         inputSchema: {
           type: "object"
           properties: {}
-          required: {}
+          required: json.empty_array
         }
         handler: (params) =>
           @list_models!
@@ -256,21 +288,23 @@ class McpServer
     tool = @tools[tool_name]
 
     -- Validate required parameters
-    for param_name in *tool.inputSchema.required
-      if not params[param_name]
-        return {
-          jsonrpc: "2.0"
-          id: message.id
-          result: {
-            content: {
-              {
-                type: "text"
-                text: "Missing required parameter: #{param_name}"
+    -- it might not be a table if it's json.empty_array
+    if type(tool.inputSchema.required) == "table"
+      for param_name in *tool.inputSchema.required
+        if not params[param_name]
+          return {
+            jsonrpc: "2.0"
+            id: message.id
+            result: {
+              content: {
+                {
+                  type: "text"
+                  text: "Missing required parameter: #{param_name}"
+                }
               }
+              isError: true
             }
-            isError: true
           }
-        }
 
     -- Call the tool handler
     ok, result_or_error = pcall(tool.handler, @, params)

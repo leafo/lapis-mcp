@@ -8,6 +8,9 @@ do
   local _base_0 = {
     read_json_chunk = function(self)
       local chunk = io.read("*l")
+      if not (chunk) then
+        return false
+      end
       local message = json.decode(chunk)
       if not (message) then
         return nil, "Failed to decode JSON chunk"
@@ -35,6 +38,50 @@ do
   })
   _base_0.__class = _class_0
   StdioTransport = _class_0
+end
+local StdioTransportWithDebugLog
+do
+  local _class_0
+  local _base_0 = {
+    read_json_chunk = function(self)
+      local chunk = io.read("*l")
+      if not (chunk) then
+        return false
+      end
+      self.file_log:write("READ: " .. chunk .. "\n")
+      self.file_log:flush()
+      local message = json.decode(chunk)
+      if not (message) then
+        return nil, "Failed to decode JSON chunk"
+      end
+      return message
+    end,
+    write_json_chunk = function(self, obj)
+      local data = assert(json.encode(obj))
+      self.file_log:write("WRITE: " .. data .. "\n")
+      self.file_log:flush()
+      io.write(data .. "\n")
+      return io.flush()
+    end
+  }
+  _base_0.__index = _base_0
+  _class_0 = setmetatable({
+    __init = function(self)
+      self.file_log = io.open("/tmp/lapis-mcp.log", "a")
+      return self.file_log:write("START SESSION: " .. os.date("%Y-%m-%d %H:%M:%S") .. "\n")
+    end,
+    __base = _base_0,
+    __name = "StdioTransportWithDebugLog"
+  }, {
+    __index = _base_0,
+    __call = function(cls, ...)
+      local _self_0 = setmetatable({}, _base_0)
+      cls.__init(_self_0, ...)
+      return _self_0
+    end
+  })
+  _base_0.__class = _class_0
+  StdioTransportWithDebugLog = _class_0
 end
 local StreamableHttpTransport
 do
@@ -114,7 +161,7 @@ do
           inputSchema = {
             type = "object",
             properties = { },
-            required = { }
+            required = json.empty_array
           },
           handler = function(self, params)
             return self:list_routes()
@@ -127,7 +174,7 @@ do
           inputSchema = {
             type = "object",
             properties = { },
-            required = { }
+            required = json.empty_array
           },
           handler = function(self, params)
             return self:list_models()
@@ -300,23 +347,25 @@ do
         }
       end
       local tool = self.tools[tool_name]
-      local _list_0 = tool.inputSchema.required
-      for _index_0 = 1, #_list_0 do
-        local param_name = _list_0[_index_0]
-        if not params[param_name] then
-          return {
-            jsonrpc = "2.0",
-            id = message.id,
-            result = {
-              content = {
-                {
-                  type = "text",
-                  text = "Missing required parameter: " .. tostring(param_name)
-                }
-              },
-              isError = true
+      if type(tool.inputSchema.required) == "table" then
+        local _list_0 = tool.inputSchema.required
+        for _index_0 = 1, #_list_0 do
+          local param_name = _list_0[_index_0]
+          if not params[param_name] then
+            return {
+              jsonrpc = "2.0",
+              id = message.id,
+              result = {
+                content = {
+                  {
+                    type = "text",
+                    text = "Missing required parameter: " .. tostring(param_name)
+                  }
+                },
+                isError = true
+              }
             }
-          }
+          end
         end
       end
       local ok, result_or_error = pcall(tool.handler, self, params)
