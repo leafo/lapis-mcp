@@ -5,7 +5,7 @@ json = require "cjson"
 {
   argparser: ->
     with require("argparse") "lapis mcp", "Run an MCP server over stdin/out that can communicate with details of Lapis app"
-      \option "--send-message", "Send a message by name and exit (e.g. list_tools, server_info, or a tool name)"
+      \option "--send-message", "Send a raw message by name and exit (e.g. tools/list, initialize, server_info)"
       \option "--tool", "Immediately invoke a tool, print output and exit (e.g. routes, models, schema)"
 
   (args, lapis_args) =>
@@ -17,6 +17,26 @@ json = require "cjson"
     -- Handle --tool argument
     if args.tool
       tool_name = args.tool
+
+      -- First initialize the server
+      init_message = {
+        jsonrpc: "2.0"
+        id: "init-#{os.time!}"
+        method: "initialize"
+        params: {
+          protocolVersion: "2025-06-18"
+          capabilities: {}
+          clientInfo: {
+            name: "lapis-mcp-cli"
+            version: "0.1.0"
+          }
+        }
+      }
+
+      init_response = server\send_message(init_message)
+      if init_response.error
+        print "Error initializing server: #{json.encode(init_response.error)}"
+        return
 
       -- Create a tool call message
       message = {
@@ -43,17 +63,42 @@ json = require "cjson"
     elseif args.send_message
       message_type = args.send_message
 
+      -- Handle special cases that don't require initialization
+      if message_type == "server_info"
+        print json.encode(server\get_server_info!)
+        return
+
+      -- For all other messages, initialize first
+      init_message = {
+        jsonrpc: "2.0"
+        id: "init-#{os.time!}"
+        method: "initialize"
+        params: {
+          protocolVersion: "2025-06-18"
+          capabilities: {}
+          clientInfo: {
+            name: "lapis-mcp-cli"
+            version: "0.1.0"
+          }
+        }
+      }
+
+      init_response = server\send_message(init_message)
+      if init_response.error
+        print "Error initializing server: #{json.encode(init_response.error)}"
+        return
+
       -- Create message based on type
       message = nil
-      if message_type == "list_tools"
+      if message_type == "tools/list"
         message = {
           jsonrpc: "2.0"
           id: "cmd-line-#{os.time!}"
           method: "tools/list"
         }
-      elseif message_type == "server_info"
-        -- Skip sending message and directly return server info
-        print json.encode(server\get_server_info!)
+      elseif message_type == "initialize"
+        -- Already handled above, just return the init response
+        print json.encode(init_response)
         return
       else
         -- Assume it's a tool call
