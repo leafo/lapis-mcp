@@ -1,5 +1,24 @@
-import McpServer, find_lapis_application from require "lapis.mcp.server"
+import McpServer  from require "lapis.mcp.server"
 json = require "cjson"
+
+-- Helper functions outside the class
+find_lapis_application = (config) ->
+  -- Try to load the main application module
+  app_module = "app"
+  if config and config.app_module
+    app_module = config.app_module
+
+  ok, app = pcall(require, app_module)
+  if ok
+    return app
+
+  -- Fall back to loading a default Lapis application
+  ok, lapis = pcall(require, "lapis")
+  if ok
+    return lapis.Application()
+
+  error("Could not find a Lapis application")
+
 
 -- Command-line interface for the MCP server
 {
@@ -7,12 +26,13 @@ json = require "cjson"
     with require("argparse") "lapis mcp", "Run an MCP server over stdin/out that can communicate with details of Lapis app"
       \option "--send-message", "Send a raw message by name and exit (e.g. tools/list, initialize)"
       \option "--tool", "Immediately invoke a tool, print output and exit (e.g. routes, models, schema)"
+      \flag "--debug", "Enable debug logging to stderr"
 
   (args, lapis_args) =>
     config = @get_config lapis_args.environment
     app = find_lapis_application(config)
 
-    server = McpServer(app)
+    server = McpServer(app, args.debug)
 
     -- Handle --tool argument
     if args.tool
@@ -115,5 +135,5 @@ json = require "cjson"
       return
 
     -- Run server normally
-    server\run!
+    server\run_stdio!
 }

@@ -1,22 +1,37 @@
-local McpServer, find_lapis_application
-do
-  local _obj_0 = require("lapis.mcp.server")
-  McpServer, find_lapis_application = _obj_0.McpServer, _obj_0.find_lapis_application
-end
+local McpServer
+McpServer = require("lapis.mcp.server").McpServer
 local json = require("cjson")
+local find_lapis_application
+find_lapis_application = function(config)
+  local app_module = "app"
+  if config and config.app_module then
+    app_module = config.app_module
+  end
+  local ok, app = pcall(require, app_module)
+  if ok then
+    return app
+  end
+  local lapis
+  ok, lapis = pcall(require, "lapis")
+  if ok then
+    return lapis.Application()
+  end
+  return error("Could not find a Lapis application")
+end
 return {
   argparser = function()
     do
       local _with_0 = require("argparse")("lapis mcp", "Run an MCP server over stdin/out that can communicate with details of Lapis app")
       _with_0:option("--send-message", "Send a raw message by name and exit (e.g. tools/list, initialize)")
       _with_0:option("--tool", "Immediately invoke a tool, print output and exit (e.g. routes, models, schema)")
+      _with_0:flag("--debug", "Enable debug logging to stderr")
       return _with_0
     end
   end,
   function(self, args, lapis_args)
     local config = self:get_config(lapis_args.environment)
     local app = find_lapis_application(config)
-    local server = McpServer(app)
+    local server = McpServer(app, args.debug)
     if args.tool then
       local tool_name = args.tool
       local init_message = {
@@ -98,6 +113,6 @@ return {
       print(json.encode(response))
       return 
     end
-    return server:run()
+    return server:run_stdio()
   end
 }
