@@ -12,27 +12,44 @@ class McpServer
   setup_tools: =>
     @tools = {
       routes: {
+        name: "routes"
+        title: "List Routes"
         description: "Lists all named routes in the Lapis application"
-        parameters: {}
+        inputSchema: {
+          type: "object"
+          properties: {}
+          required: {}
+        }
         handler: (params) =>
           @list_routes!
       }
 
       models: {
+        name: "models"
+        title: "List Models"
         description: "Lists all database models defined in the application"
-        parameters: {}
+        inputSchema: {
+          type: "object"
+          properties: {}
+          required: {}
+        }
         handler: (params) =>
           @list_models!
       }
 
       schema: {
+        name: "schema"
+        title: "Get Model Schema"
         description: "Shows the schema for a specific database model"
-        parameters: {
-          model_name: {
-            type: "string"
-            description: "Name of the model to inspect"
-            required: true
+        inputSchema: {
+          type: "object"
+          properties: {
+            model_name: {
+              type: "string"
+              description: "Name of the model to inspect"
+            }
           }
+          required: {"model_name"}
         }
         handler: (params) =>
           schema, err = @get_model_schema(params.model_name)
@@ -95,56 +112,101 @@ class McpServer
 
   -- Message handler
   handle_message: (message) =>
-    if message.type == "tool_call"
-      tool_name = message.tool_call.name
-      params = message.tool_call.parameters
+    if message.method == "tools/call"
+      tool_name = message.params.name
+      params = message.params.arguments or {}
 
       unless @tools[tool_name]
         return {
-          type: "tool_result"
+          jsonrpc: "2.0"
           id: message.id
-          tool_result: {
-            error: "Unknown tool: #{tool_name}"
+          result: {
+            content: {
+              {
+                type: "text"
+                text: "Unknown tool: #{tool_name}"
+              }
+            }
+            isError: true
           }
         }
 
       tool = @tools[tool_name]
 
       -- Validate required parameters
-      for param_name, param_def in pairs(tool.parameters)
-        if param_def.required and not params[param_name]
+      for param_name in *tool.inputSchema.required
+        if not params[param_name]
           return {
-            type: "tool_result"
+            jsonrpc: "2.0"
             id: message.id
-            tool_result: {
-              error: "Missing required parameter: #{param_name}"
+            result: {
+              content: {
+                {
+                  type: "text"
+                  text: "Missing required parameter: #{param_name}"
+                }
+              }
+              isError: true
             }
           }
 
       -- Call the tool handler
-      result = nil
       ok, result_or_error = pcall(tool.handler, @, params)
 
       if not ok
         return {
-          type: "tool_result"
+          jsonrpc: "2.0"
           id: message.id
-          tool_result: {
-            error: "Error executing tool: #{result_or_error}"
+          result: {
+            content: {
+              {
+                type: "text"
+                text: "Error executing tool: #{result_or_error}"
+              }
+            }
+            isError: true
+          }
+        }
+
+      -- Handle error result from tool
+      if result_or_error.error
+        return {
+          jsonrpc: "2.0"
+          id: message.id
+          result: {
+            content: {
+              {
+                type: "text"
+                text: result_or_error.error
+              }
+            }
+            isError: true
           }
         }
 
       return {
-        type: "tool_result"
+        jsonrpc: "2.0"
         id: message.id
-        tool_result: result_or_error
+        result: {
+          content: {
+            {
+              type: "text"
+              text: json.encode(result_or_error)
+            }
+          }
+          isError: false
+        }
       }
-    elseif message.type == "list_tools"
+    elseif message.method == "tools/list"
       return @get_tools_list!
     else
       return {
-        type: "error"
-        error: "Unsupported message type: #{message.type}"
+        jsonrpc: "2.0"
+        id: message.id
+        error: {
+          code: -32601
+          message: "Method not found: #{message.method}"
+        }
       }
 
   -- Get tools list response (for API and testing)
@@ -153,14 +215,17 @@ class McpServer
 
     for name, tool in pairs(@tools)
       insert tools_list, {
-        name: name
+        name: tool.name
+        title: tool.title
         description: tool.description
-        parameters: tool.parameters
+        inputSchema: tool.inputSchema
       }
 
     {
-      type: "tools_list"
-      tools: tools_list
+      jsonrpc: "2.0"
+      result: {
+        tools: tools_list
+      }
     }
 
   -- Server info response

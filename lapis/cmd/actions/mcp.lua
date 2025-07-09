@@ -14,26 +14,23 @@ return {
     end
   end,
   function(self, args, lapis_args)
-    if args.hello then
-      print("Hello from Lapis MCP!")
-      return 
-    end
     local config = self:get_config(lapis_args.environment)
     local app = find_lapis_application(config)
     local server = McpServer(app)
     if args.tool then
       local tool_name = args.tool
       local message = {
-        type = "tool_call",
+        jsonrpc = "2.0",
         id = "cmd-line-" .. tostring(os.time()),
-        tool_call = {
+        method = "tools/call",
+        params = {
           name = tool_name,
-          parameters = { }
+          arguments = { }
         }
       }
       local response = server:send_message(message)
-      if response.type == "tool_result" and response.tool_result then
-        print(json.encode(response.tool_result))
+      if response.result and response.result.content then
+        print(json.encode(response.result.content))
       else
         print(json.encode(response))
       end
@@ -43,18 +40,21 @@ return {
       local message = nil
       if message_type == "list_tools" then
         message = {
-          type = "list_tools"
+          jsonrpc = "2.0",
+          id = "cmd-line-" .. tostring(os.time()),
+          method = "tools/list"
         }
       elseif message_type == "server_info" then
         print(json.encode(server:get_server_info()))
         return 
       else
         message = {
-          type = "tool_call",
+          jsonrpc = "2.0",
           id = "cmd-line-" .. tostring(os.time()),
-          tool_call = {
+          method = "tools/call",
+          params = {
             name = message_type,
-            parameters = { }
+            arguments = { }
           }
         }
       end

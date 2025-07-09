@@ -8,26 +8,45 @@ do
     setup_tools = function(self)
       self.tools = {
         routes = {
+          name = "routes",
+          title = "List Routes",
           description = "Lists all named routes in the Lapis application",
-          parameters = { },
+          inputSchema = {
+            type = "object",
+            properties = { },
+            required = { }
+          },
           handler = function(self, params)
             return self:list_routes()
           end
         },
         models = {
+          name = "models",
+          title = "List Models",
           description = "Lists all database models defined in the application",
-          parameters = { },
+          inputSchema = {
+            type = "object",
+            properties = { },
+            required = { }
+          },
           handler = function(self, params)
             return self:list_models()
           end
         },
         schema = {
+          name = "schema",
+          title = "Get Model Schema",
           description = "Shows the schema for a specific database model",
-          parameters = {
-            model_name = {
-              type = "string",
-              description = "Name of the model to inspect",
-              required = true
+          inputSchema = {
+            type = "object",
+            properties = {
+              model_name = {
+                type = "string",
+                description = "Name of the model to inspect"
+              }
+            },
+            required = {
+              "model_name"
             }
           },
           handler = function(self, params)
@@ -105,52 +124,98 @@ do
       return { }
     end,
     handle_message = function(self, message)
-      if message.type == "tool_call" then
-        local tool_name = message.tool_call.name
-        local params = message.tool_call.parameters
+      if message.method == "tools/call" then
+        local tool_name = message.params.name
+        local params = message.params.arguments or { }
         if not (self.tools[tool_name]) then
           return {
-            type = "tool_result",
+            jsonrpc = "2.0",
             id = message.id,
-            tool_result = {
-              error = "Unknown tool: " .. tostring(tool_name)
+            result = {
+              content = {
+                {
+                  type = "text",
+                  text = "Unknown tool: " .. tostring(tool_name)
+                }
+              },
+              isError = true
             }
           }
         end
         local tool = self.tools[tool_name]
-        for param_name, param_def in pairs(tool.parameters) do
-          if param_def.required and not params[param_name] then
+        local _list_0 = tool.inputSchema.required
+        for _index_0 = 1, #_list_0 do
+          local param_name = _list_0[_index_0]
+          if not params[param_name] then
             return {
-              type = "tool_result",
+              jsonrpc = "2.0",
               id = message.id,
-              tool_result = {
-                error = "Missing required parameter: " .. tostring(param_name)
+              result = {
+                content = {
+                  {
+                    type = "text",
+                    text = "Missing required parameter: " .. tostring(param_name)
+                  }
+                },
+                isError = true
               }
             }
           end
         end
-        local result = nil
         local ok, result_or_error = pcall(tool.handler, self, params)
         if not ok then
           return {
-            type = "tool_result",
+            jsonrpc = "2.0",
             id = message.id,
-            tool_result = {
-              error = "Error executing tool: " .. tostring(result_or_error)
+            result = {
+              content = {
+                {
+                  type = "text",
+                  text = "Error executing tool: " .. tostring(result_or_error)
+                }
+              },
+              isError = true
+            }
+          }
+        end
+        if result_or_error.error then
+          return {
+            jsonrpc = "2.0",
+            id = message.id,
+            result = {
+              content = {
+                {
+                  type = "text",
+                  text = result_or_error.error
+                }
+              },
+              isError = true
             }
           }
         end
         return {
-          type = "tool_result",
+          jsonrpc = "2.0",
           id = message.id,
-          tool_result = result_or_error
+          result = {
+            content = {
+              {
+                type = "text",
+                text = json.encode(result_or_error)
+              }
+            },
+            isError = false
+          }
         }
-      elseif message.type == "list_tools" then
+      elseif message.method == "tools/list" then
         return self:get_tools_list()
       else
         return {
-          type = "error",
-          error = "Unsupported message type: " .. tostring(message.type)
+          jsonrpc = "2.0",
+          id = message.id,
+          error = {
+            code = -32601,
+            message = "Method not found: " .. tostring(message.method)
+          }
         }
       end
     end,
@@ -158,14 +223,17 @@ do
       local tools_list = { }
       for name, tool in pairs(self.tools) do
         insert(tools_list, {
-          name = name,
+          name = tool.name,
+          title = tool.title,
           description = tool.description,
-          parameters = tool.parameters
+          inputSchema = tool.inputSchema
         })
       end
       return {
-        type = "tools_list",
-        tools = tools_list
+        jsonrpc = "2.0",
+        result = {
+          tools = tools_list
+        }
       }
     end,
     get_server_info = function(self)

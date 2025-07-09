@@ -9,10 +9,6 @@ json = require "cjson"
       \option "--tool", "Immediately invoke a tool, print output and exit (e.g. routes, models, schema)"
 
   (args, lapis_args) =>
-    if args.hello
-      print "Hello from Lapis MCP!"
-      return
-
     config = @get_config lapis_args.environment
     app = find_lapis_application(config)
 
@@ -24,11 +20,12 @@ json = require "cjson"
 
       -- Create a tool call message
       message = {
-        type: "tool_call"
+        jsonrpc: "2.0"
         id: "cmd-line-#{os.time!}"
-        tool_call: {
+        method: "tools/call"
+        params: {
           name: tool_name
-          parameters: {}
+          arguments: {}
         }
       }
 
@@ -36,8 +33,8 @@ json = require "cjson"
       response = server\send_message(message)
 
       -- Output just the tool result, not the full response
-      if response.type == "tool_result" and response.tool_result
-        print json.encode(response.tool_result)
+      if response.result and response.result.content
+        print json.encode(response.result.content)
       else
         print json.encode(response)
       return
@@ -49,7 +46,11 @@ json = require "cjson"
       -- Create message based on type
       message = nil
       if message_type == "list_tools"
-        message = { type: "list_tools" }
+        message = {
+          jsonrpc: "2.0"
+          id: "cmd-line-#{os.time!}"
+          method: "tools/list"
+        }
       elseif message_type == "server_info"
         -- Skip sending message and directly return server info
         print json.encode(server\get_server_info!)
@@ -57,11 +58,12 @@ json = require "cjson"
       else
         -- Assume it's a tool call
         message = {
-          type: "tool_call"
+          jsonrpc: "2.0"
           id: "cmd-line-#{os.time!}"
-          tool_call: {
+          method: "tools/call"
+          params: {
             name: message_type
-            parameters: {}
+            arguments: {}
           }
         }
 

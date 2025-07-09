@@ -32,6 +32,13 @@ The MCP server provides the following tools:
 - `models` - Lists all models/database tables defined in your application
 - `schema <model_name>` - Shows the database schema for a specific model
 
+
+## Guides
+
+https://modelcontextprotocol.io/specification/2025-06-18/basic/lifecycle.md
+https://modelcontextprotocol.io/specification/2025-06-18/server/tools.md
+
+
 ## License
 
 MIT
