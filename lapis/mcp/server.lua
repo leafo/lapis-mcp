@@ -152,86 +152,21 @@ do
       local timestamp = os.date("%H:%M:%S")
       return io.stderr:write(colors(tostring(color) .. "[" .. tostring(timestamp) .. "] " .. tostring(level:upper()) .. ": " .. tostring(message) .. "%{reset}\n"))
     end,
-    setup_tools = function(self)
-      self.tools = {
-        routes = {
-          name = "routes",
-          title = "List Routes",
-          description = "Lists all named routes in the Lapis application",
-          inputSchema = {
-            type = "object",
-            properties = { },
-            required = json.empty_array
-          },
-          handler = function(self, params)
-            local routes = { }
-            assert(self.app, "Missing app class")
-            local router = self.app().router
-            router:build()
-            local tuples
-            do
-              local _accum_0 = { }
-              local _len_0 = 1
-              for k, v in pairs(router.named_routes) do
-                _accum_0[_len_0] = {
-                  k,
-                  v
-                }
-                _len_0 = _len_0 + 1
-              end
-              tuples = _accum_0
-            end
-            table.sort(tuples, function(a, b)
-              return a[1] < b[1]
-            end)
-            return tuples
-          end
-        },
-        models = {
-          name = "models",
-          title = "List Models",
-          description = "Lists all database models defined in the application",
-          inputSchema = {
-            type = "object",
-            properties = { },
-            required = json.empty_array
-          },
-          handler = function(self, params)
-            local models = { }
-            error("not implemented yet")
-            return models
-          end
-        },
-        schema = {
-          name = "schema",
-          title = "Get Model Schema",
-          description = "Shows the schema for a specific database model",
-          inputSchema = {
-            type = "object",
-            properties = {
-              model_name = {
-                type = "string",
-                description = "Name of the model to inspect"
-              }
-            },
-            required = {
-              "model_name"
-            }
-          },
-          handler = function(self, params)
-            local model_name = params.model_name
-            local ok, db = pcall(require, "models")
-            if not ok or type(db) ~= "table" or not db[model_name] then
-              return nil, "Model not found: " .. tostring(model_name)
-            end
-            local model = db[model_name]
-            return error("not implemented yet")
-          end
-        }
-      }
-    end,
     find_tool = function(self, name)
-      return self.tools[name]
+      local current_class = self.__class
+      while current_class do
+        local tools = rawget(current_class, "tools")
+        if tools then
+          for _index_0 = 1, #tools do
+            local tool = tools[_index_0]
+            if tool.name == name then
+              return tool
+            end
+          end
+        end
+        current_class = current_class.__parent
+      end
+      return nil
     end,
     read_json_chunk = function(self)
       return self.transport:read_json_chunk()
@@ -288,19 +223,12 @@ do
         }
       end
       self.server_capabilities.tools = { }
-      for name, tool in pairs(self.tools) do
+      local tools = self:get_all_tools()
+      for name, tool in pairs(tools) do
         self.server_capabilities.tools[name] = true
       end
       self.initialized = true
-      self:debug_log("success", "Server initialized successfully with " .. tostring(table.getn((function()
-        local _accum_0 = { }
-        local _len_0 = 1
-        for k, v in pairs(self.tools) do
-          _accum_0[_len_0] = k
-          _len_0 = _len_0 + 1
-        end
-        return _accum_0
-      end)())) .. " tools")
+      self:debug_log("success", "Server initialized successfully with " .. tostring(#tools) .. " tools")
       return {
         jsonrpc = "2.0",
         id = message.id,
@@ -404,16 +332,44 @@ do
         }
       }
     end),
-    handle_tools_list = with_initialized(function(self, message)
-      local tools_list = { }
-      for name, tool in pairs(self.tools) do
-        insert(tools_list, {
-          name = tool.name,
-          title = tool.title,
-          description = tool.description,
-          inputSchema = tool.inputSchema
-        })
+    get_all_tools = function(self)
+      local all_tools = { }
+      local current_class = self.__class
+      while current_class do
+        do
+          local tools = rawget(current_class, "tools")
+          if tools then
+            for _index_0 = 1, #tools do
+              local tool = tools[_index_0]
+              if not (all_tools[tool.name]) then
+                all_tools[tool.name] = tool
+              end
+            end
+          end
+        end
+        current_class = current_class.__parent
       end
+      return all_tools
+    end,
+    handle_tools_list = with_initialized(function(self, message)
+      local tools_list
+      do
+        local _accum_0 = { }
+        local _len_0 = 1
+        for name, tool in pairs(self:get_all_tools()) do
+          _accum_0[_len_0] = {
+            name = tool.name,
+            title = tool.title,
+            description = tool.description,
+            inputSchema = tool.inputSchema
+          }
+          _len_0 = _len_0 + 1
+        end
+        tools_list = _accum_0
+      end
+      table.sort(tools_list, function(a, b)
+        return a.name < b.name
+      end)
       return {
         jsonrpc = "2.0",
         id = message.id,
@@ -459,12 +415,11 @@ do
   }
   _base_0.__index = _base_0
   _class_0 = setmetatable({
-    __init = function(self, app, debug)
-      if debug == nil then
-        debug = false
+    __init = function(self, options)
+      if options == nil then
+        options = { }
       end
-      self.app, self.debug = app, debug
-      self:setup_tools()
+      self.debug = options.debug or false
       self.protocol_version = "2025-06-18"
       self.server_capabilities = {
         tools = { }
@@ -487,9 +442,137 @@ do
   self.server_name = "lapis-mcp"
   self.server_version = "1.0.0"
   self.server_vendor = "Lapis"
+  self.add_tool = function(self, details, call_fn)
+    if not (rawget(self, "tools")) then
+      rawset(self, "tools", { })
+    end
+    local tool_def = {
+      name = details.name,
+      title = details.title,
+      description = details.description,
+      inputSchema = details.inputSchema,
+      handler = call_fn
+    }
+    return table.insert(rawget(self, "tools"), tool_def)
+  end
   McpServer = _class_0
+end
+local LapisMcpServer
+do
+  local _class_0
+  local _parent_0 = McpServer
+  local _base_0 = { }
+  _base_0.__index = _base_0
+  setmetatable(_base_0, _parent_0.__base)
+  _class_0 = setmetatable({
+    __init = function(self, app, options)
+      if options == nil then
+        options = { }
+      end
+      self.app = app
+      return _class_0.__parent.__init(self, options)
+    end,
+    __base = _base_0,
+    __name = "LapisMcpServer",
+    __parent = _parent_0
+  }, {
+    __index = function(cls, name)
+      local val = rawget(_base_0, name)
+      if val == nil then
+        local parent = rawget(cls, "__parent")
+        if parent then
+          return parent[name]
+        end
+      else
+        return val
+      end
+    end,
+    __call = function(cls, ...)
+      local _self_0 = setmetatable({}, _base_0)
+      cls.__init(_self_0, ...)
+      return _self_0
+    end
+  })
+  _base_0.__class = _class_0
+  local self = _class_0
+  self:add_tool({
+    name = "routes",
+    title = "List Routes",
+    description = "Lists all named routes in the Lapis application",
+    inputSchema = {
+      type = "object",
+      properties = { },
+      required = json.empty_array
+    }
+  }, function(self, params)
+    local routes = { }
+    assert(self.app, "Missing app class")
+    local router = self.app().router
+    router:build()
+    local tuples
+    do
+      local _accum_0 = { }
+      local _len_0 = 1
+      for k, v in pairs(router.named_routes) do
+        _accum_0[_len_0] = {
+          k,
+          v
+        }
+        _len_0 = _len_0 + 1
+      end
+      tuples = _accum_0
+    end
+    table.sort(tuples, function(a, b)
+      return a[1] < b[1]
+    end)
+    return tuples
+  end)
+  self:add_tool({
+    name = "models",
+    title = "List Models",
+    description = "Lists all database models defined in the application",
+    inputSchema = {
+      type = "object",
+      properties = { },
+      required = json.empty_array
+    }
+  }, function(self, params)
+    local models = { }
+    error("not implemented yet")
+    return models
+  end)
+  self:add_tool({
+    name = "schema",
+    title = "Get Model Schema",
+    description = "Shows the schema for a specific database model",
+    inputSchema = {
+      type = "object",
+      properties = {
+        model_name = {
+          type = "string",
+          description = "Name of the model to inspect"
+        }
+      },
+      required = {
+        "model_name"
+      }
+    }
+  }, function(self, params)
+    local model_name = params.model_name
+    local ok, db = pcall(require, "models")
+    if not ok or type(db) ~= "table" or not db[model_name] then
+      return nil, "Model not found: " .. tostring(model_name)
+    end
+    local model = db[model_name]
+    return error("not implemented yet")
+  end)
+  if _parent_0.__inherited then
+    _parent_0.__inherited(_parent_0, _class_0)
+  end
+  LapisMcpServer = _class_0
 end
 return {
   McpServer = McpServer,
+  LapisMcpServer = LapisMcpServer,
   StdioTransport = StdioTransport
 }

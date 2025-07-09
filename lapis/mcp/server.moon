@@ -73,13 +73,31 @@ with_initialized = (fn) ->
 
     fn @, message
 
+-- Base MCP server class that can be extended
 class McpServer
   @server_name: "lapis-mcp"
   @server_version: "1.0.0"
   @server_vendor: "Lapis"
 
-  new: (@app, @debug = false) =>
-    @setup_tools!
+  -- Class method to add tools to the server
+  @add_tool: (details, call_fn) =>
+    -- Initialize tools registry on this class if it doesn't exist
+    unless rawget(@, "tools")
+      rawset(@, "tools", {})
+
+    tool_def = {
+      name: details.name
+      title: details.title
+      description: details.description
+      inputSchema: details.inputSchema
+      handler: call_fn
+    }
+
+    -- Insert tool into array
+    table.insert(rawget(@, "tools"), tool_def)
+
+  new: (options = {}) =>
+    @debug = options.debug or false
     @protocol_version = "2025-06-18"
     @server_capabilities = {
       tools: {}
@@ -102,73 +120,19 @@ class McpServer
     timestamp = os.date("%H:%M:%S")
     io.stderr\write colors "#{color}[#{timestamp}] #{level\upper!}: #{message}%{reset}\n"
 
-  -- Setup available tools
-  setup_tools: =>
-    @tools = {
-      routes: {
-        name: "routes"
-        title: "List Routes"
-        description: "Lists all named routes in the Lapis application"
-        inputSchema: {
-          type: "object"
-          properties: {}
-          required: json.empty_array
-        }
-        handler: (params) =>
-          routes = {}
-          assert @app, "Missing app class"
-          router = @.app!.router
-          router\build!
-
-          tuples = [{k,v} for k,v in pairs router.named_routes]
-          table.sort tuples, (a,b) -> a[1] < b[1]
-
-          tuples
-      }
-
-      models: {
-        name: "models"
-        title: "List Models"
-        description: "Lists all database models defined in the application"
-        inputSchema: {
-          type: "object"
-          properties: {}
-          required: json.empty_array
-        }
-        handler: (params) =>
-          models = {}
-          error("not implemented yet")
-          models
-      }
-
-      schema: {
-        name: "schema"
-        title: "Get Model Schema"
-        description: "Shows the schema for a specific database model"
-        inputSchema: {
-          type: "object"
-          properties: {
-            model_name: {
-              type: "string"
-              description: "Name of the model to inspect"
-            }
-          }
-          required: {"model_name"}
-        }
-        handler: (params) =>
-          model_name = params.model_name
-
-          ok, db = pcall(require, "models")
-          if not ok or type(db) != "table" or not db[model_name]
-            return nil, "Model not found: #{model_name}"
-
-          model = db[model_name]
-          error "not implemented yet"
-      }
-    }
 
   find_tool: (name) =>
-    @tools[name]
+    -- Search up the inheritance chain for the tool
+    current_class = @.__class
+    while current_class
+      tools = rawget(current_class, "tools")
+      if tools
+        -- Search through the array for the tool by name
+        for tool in *tools
+          if tool.name == name
+            return tool
+      current_class = current_class.__parent
+    nil
 
   -- IO and message handling
   read_json_chunk: =>
@@ -235,11 +199,12 @@ class McpServer
 
     -- Set up server capabilities based on available tools
     @server_capabilities.tools = {}
-    for name, tool in pairs(@tools)
+    tools = @get_all_tools!
+    for name, tool in pairs(tools)
       @server_capabilities.tools[name] = true
 
     @initialized = true
-    @debug_log "success", "Server initialized successfully with #{table.getn([k for k,v in pairs(@tools)])} tools"
+    @debug_log "success", "Server initialized successfully with #{#tools} tools"
 
     {
       jsonrpc: "2.0"
@@ -348,17 +313,30 @@ class McpServer
       }
     }
 
+  -- Get all tools from the inheritance chain
+  get_all_tools: =>
+    all_tools = {}
+    current_class = @__class
+    while current_class
+      if tools = rawget(current_class, "tools")
+        for tool in *tools
+          unless all_tools[tool.name]  -- Don't override tools from parent classes
+            all_tools[tool.name] = tool
+
+      current_class = current_class.__parent
+    all_tools
+
   -- Get tools list response (for API and testing)
   handle_tools_list: with_initialized (message) =>
-    tools_list = {}
-
-    for name, tool in pairs(@tools)
-      insert tools_list, {
+    tools_list = for name, tool in pairs @get_all_tools!
+      {
         name: tool.name
         title: tool.title
         description: tool.description
         inputSchema: tool.inputSchema
       }
+
+    table.sort tools_list, (a, b) -> a.name < b.name
 
     {
       jsonrpc: "2.0"
@@ -399,4 +377,68 @@ class McpServer
       if response
         @write_json_chunk response
 
-{:McpServer, :StdioTransport}
+-- Lapis-specific MCP server implementation
+class LapisMcpServer extends McpServer
+  new: (@app, options = {}) =>
+    super(options)
+
+  -- Register the built-in Lapis tools
+  @add_tool {
+    name: "routes"
+    title: "List Routes"
+    description: "Lists all named routes in the Lapis application"
+    inputSchema: {
+      type: "object"
+      properties: {}
+      required: json.empty_array
+    }
+  }, (params) =>
+    routes = {}
+    assert @app, "Missing app class"
+    router = @.app!.router
+    router\build!
+
+    tuples = [{k,v} for k,v in pairs router.named_routes]
+    table.sort tuples, (a,b) -> a[1] < b[1]
+
+    tuples
+
+  @add_tool {
+    name: "models"
+    title: "List Models"
+    description: "Lists all database models defined in the application"
+    inputSchema: {
+      type: "object"
+      properties: {}
+      required: json.empty_array
+    }
+  }, (params) =>
+    models = {}
+    error("not implemented yet")
+    models
+
+  @add_tool {
+    name: "schema"
+    title: "Get Model Schema"
+    description: "Shows the schema for a specific database model"
+    inputSchema: {
+      type: "object"
+      properties: {
+        model_name: {
+          type: "string"
+          description: "Name of the model to inspect"
+        }
+      }
+      required: {"model_name"}
+    }
+  }, (params) =>
+    model_name = params.model_name
+
+    ok, db = pcall(require, "models")
+    if not ok or type(db) != "table" or not db[model_name]
+      return nil, "Model not found: #{model_name}"
+
+    model = db[model_name]
+    error "not implemented yet"
+
+{:McpServer, :LapisMcpServer, :StdioTransport}

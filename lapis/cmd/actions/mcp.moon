@@ -1,4 +1,4 @@
-import McpServer  from require "lapis.mcp.server"
+import LapisMcpServer  from require "lapis.mcp.server"
 json = require "cjson"
 
 -- Helper functions outside the class
@@ -33,7 +33,7 @@ find_lapis_application = (config) ->
     config = @get_config lapis_args.environment
     app = find_lapis_application(config)
 
-    server = McpServer(app, args.debug)
+    server = LapisMcpServer(app, {debug: args.debug})
 
     if args.skip_initialize
       server.initialized = true

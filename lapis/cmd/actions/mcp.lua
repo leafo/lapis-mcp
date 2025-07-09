@@ -1,5 +1,5 @@
-local McpServer
-McpServer = require("lapis.mcp.server").McpServer
+local LapisMcpServer
+LapisMcpServer = require("lapis.mcp.server").LapisMcpServer
 local json = require("cjson")
 local find_lapis_application
 find_lapis_application = function(config)
@@ -32,7 +32,9 @@ return {
   function(self, args, lapis_args)
     local config = self:get_config(lapis_args.environment)
     local app = find_lapis_application(config)
-    local server = McpServer(app, args.debug)
+    local server = LapisMcpServer(app, {
+      debug = args.debug
+    })
     if args.skip_initialize then
       server.initialized = true
     end
