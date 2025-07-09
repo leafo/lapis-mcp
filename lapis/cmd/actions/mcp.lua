@@ -25,6 +25,7 @@ return {
       _with_0:option("--send-message", "Send a raw message by name and exit (e.g. tools/list, initialize)")
       _with_0:option("--tool", "Immediately invoke a tool, print output and exit (e.g. routes, models, schema)")
       _with_0:flag("--debug", "Enable debug logging to stderr")
+      _with_0:flag("--skip-initialize --skip-init", "Skip the initialize stage and listen for messages immediately")
       return _with_0
     end
   end,
@@ -32,6 +33,9 @@ return {
     local config = self:get_config(lapis_args.environment)
     local app = find_lapis_application(config)
     local server = McpServer(app, args.debug)
+    if args.skip_initialize then
+      server.initialized = true
+    end
     if args.tool then
       local tool_name = args.tool
       local init_message = {

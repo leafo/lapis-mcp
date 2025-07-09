@@ -27,12 +27,16 @@ find_lapis_application = (config) ->
       \option "--send-message", "Send a raw message by name and exit (e.g. tools/list, initialize)"
       \option "--tool", "Immediately invoke a tool, print output and exit (e.g. routes, models, schema)"
       \flag "--debug", "Enable debug logging to stderr"
+      \flag "--skip-initialize --skip-init", "Skip the initialize stage and listen for messages immediately"
 
   (args, lapis_args) =>
     config = @get_config lapis_args.environment
     app = find_lapis_application(config)
 
     server = McpServer(app, args.debug)
+
+    if args.skip_initialize
+      server.initialized = true
 
     -- Handle --tool argument
     if args.tool
