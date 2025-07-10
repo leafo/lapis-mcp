@@ -24,32 +24,40 @@ Lapis MCP is a Model Context Protocol (MCP) server for the Lapis web framework. 
 
 ### Core Components
 
-1. **MCP Communication Layer** - Handles the MCP protocol communication over stdin/stdout with JSON chunks
-   - `read_json_chunk()` - Reads and parses incoming JSON messages
-   - `write_json_chunk()` - Serializes and writes outgoing JSON messages
+1. **MCP Transport Layer** - Handles the MCP protocol communication
+   - `StdioTransport` - Standard I/O transport for JSON-RPC messages
+   - `StdioTransportWithDebugLog` - Debug version that logs to `/tmp/lapis-mcp.log`
+   - `StreamableHttpTransport` - HTTP transport (TODO implementation)
 
-2. **Lapis Application Discovery** - Finds and loads the Lapis application to introspect
-   - `find_lapis_application()` - Attempts to load the application from standard locations
-
-3. **Tool Implementations** - Functions that extract information from the Lapis app
-   - `list_routes()` - Extracts route information from the application router
-   - `list_models()` - Discovers database models in the application
-   - `get_model_schema()` - Extracts schema information from a specific model
-
-4. **MCP Server** - Manages the protocol flow
+2. **Base MCP Server** (`McpServer` class) - Generic MCP server implementation
    - `handle_message()` - Dispatches incoming messages to appropriate handlers
-   - `run_mcp_server()` - Main loop that reads messages and sends responses
+   - `run_stdio()` - Main loop that reads messages and sends responses
+   - `@add_tool()` - Class method for registering tools with the server
+   - `@extend()` - Utility for creating subclasses in Lua environments
 
-### Tool Structure
+3. **Lapis-Specific Implementation** (`LapisMcpServer` class) - Extends `McpServer`
+   - `find_lapis_application()` - Attempts to load the application from standard locations
+   - Pre-registered tools specific to Lapis applications
 
-The MCP server provides these tools:
-- `routes` - Lists all named routes in the application
-- `models` - Lists all defined database models
-- `schema` - Shows the schema for a specific model
+4. **CLI Interface** - Command-line interface for the MCP server
+   - `--tool` - Direct tool invocation for testing
+   - `--send-message` - Send raw MCP messages
+   - `--debug` - Enable debug logging
+   - `--skip-initialize` - Skip initialization for testing
+
+### Available Tools
+
+The Lapis MCP server provides these tools:
+- `list_routes` - Lists all named routes in the Lapis application
+- `list_models` - Lists all defined database models in the application
+- `schema` - Shows the SQL schema for a specific model (TODO: implementation incomplete)
 
 ### File Structure
 
-- `lapis/cmd/actions/mcp.moon` - Main MCP server implementation
+- `lapis/mcp/server.moon` - Base MCP server implementation with transport layers
+- `lapis/cmd/actions/mcp.moon` - Lapis-specific MCP server and CLI interface
+- `spec/server_spec.moon` - Test specifications
+- `examples/file_system_mcp_server.moon` - Example MCP server implementation
 - `Makefile` - Build system for the project
 - `README.md` - Project documentation
 

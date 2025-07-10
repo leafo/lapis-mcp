@@ -8,8 +8,9 @@ source = {
 description = {
   summary = "Model Context Protocol (MCP) server for the Lapis web framework",
   detailed = [[
-    A Model Context Protocol (MCP) server for the Lapis web framework that provides
-    information about the current Lapis application to AI agents.
+    A base class and toolset for developing Model Context Protocol (MCP)
+    servers in Lua/Moonscript. Includes MCP server for the Lapis web framework
+    that provides information about the current Lapis application to AI agents.
   ]],
   homepage = "https://github.com/leafo/lapis-mcp",
   license = "MIT"
