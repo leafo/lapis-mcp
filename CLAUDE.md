@@ -63,8 +63,19 @@ The Lapis MCP server provides these tools:
 
 The code is written in MoonScript, which compiles to Lua.
 
+## Rockspec Configuration
+
+The project uses a LuaRocks rockspec file (`lapis-mcp-dev-1.rockspec`) to
+define the module and its installation. If any metadata changes, the rockspec
+should be reviewed and updated.
+
+When adding new modules to the project, they must be added to the `modules`
+table in the rockspec file to be included in the installation.
+
 ## Development Guidelines
 
 1. **Only edit .moon files** - Never modify the compiled .lua files directly. The Lua files are checked into the repository only so that MoonScript isn't a dependency at install time.
 
 2. After making changes to .moon files, run `make build` to compile them to Lua, and then commit both the .moon and .lua files.
+
+3. **Update rockspec when adding modules** - If you add new .moon/.lua files that should be part of the module, add them to the `modules` table in the rockspec file.
