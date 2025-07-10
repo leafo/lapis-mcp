@@ -189,6 +189,8 @@ do
         return self:handle_tools_list(message)
       elseif "tools/call" == _exp_0 then
         return self:handle_tools_call(message)
+      elseif "ping" == _exp_0 then
+        return self:handle_ping(message)
       else
         self:debug_log("warning", "Unknown method: " .. tostring(message.method))
         return {
@@ -234,15 +236,19 @@ do
       return {
         jsonrpc = "2.0",
         id = message.id,
-        result = {
-          protocolVersion = self.protocol_version,
-          capabilities = self.server_capabilities,
-          serverInfo = {
-            name = self.__class.server_name,
-            version = self.__class.server_version,
-            vendor = self.__class.server_vendor
-          }
-        }
+        result = self:server_specification()
+      }
+    end,
+    server_specification = function(self)
+      return {
+        protocolVersion = self.protocol_version,
+        capabilities = self.server_capabilities,
+        serverInfo = {
+          name = self.__class.server_name or self.__class.__name,
+          version = self.__class.server_version,
+          vendor = self.__class.server_vendor
+        },
+        instructions = self.__class.instructions
       }
     end,
     handle_tools_call = with_initialized(function(self, message)
@@ -361,7 +367,6 @@ do
         for name, tool in pairs(self:get_all_tools()) do
           _accum_0[_len_0] = {
             name = tool.name,
-            title = tool.title,
             description = tool.description,
             inputSchema = tool.inputSchema,
             annotations = tool.annotations
@@ -381,6 +386,14 @@ do
         }
       }
     end),
+    handle_ping = function(self, message)
+      self:debug_log("debug", "Received ping request")
+      return {
+        jsonrpc = "2.0",
+        id = message.id,
+        result = { }
+      }
+    end,
     handle_notifications_canceled = function(self, message)
       local id = message.params.requestId
       return nil
@@ -442,7 +455,6 @@ do
   })
   _base_0.__class = _class_0
   local self = _class_0
-  self.server_name = "lapis-mcp"
   self.server_version = "1.0.0"
   self.server_vendor = "Lapis"
   self.add_tool = function(self, details, call_fn)
@@ -451,9 +463,9 @@ do
     end
     local tool_def = {
       name = details.name,
-      title = details.title,
       description = details.description,
       inputSchema = details.inputSchema,
+      annotations = details.annotations,
       handler = call_fn
     }
     return table.insert(rawget(self, "tools"), tool_def)
@@ -498,14 +510,18 @@ do
   })
   _base_0.__class = _class_0
   local self = _class_0
+  self.server_name = "lapis-mcp"
+  self.instructions = [[Tools to query information about the Lapis web application located in the current directory]]
   self:add_tool({
-    name = "routes",
-    title = "List Routes",
+    name = "list_routes",
     description = "Lists all named routes in the Lapis application",
     inputSchema = {
       type = "object",
       properties = { },
       required = setmetatable({ }, json.array_mt)
+    },
+    annotations = {
+      title = "List Routes"
     }
   }, function(self, params)
     local routes = { }
@@ -531,23 +547,37 @@ do
     return tuples
   end)
   self:add_tool({
-    name = "models",
-    title = "List Models",
-    description = "Lists all database models defined in the application",
+    name = "list_models",
+    description = "Lists all database models defined in the application. A model is a class that represents a database table.",
     inputSchema = {
       type = "object",
       properties = { },
       required = setmetatable({ }, json.array_mt)
+    },
+    annotations = {
+      title = "List Models"
     }
   }, function(self, params)
+    local shell_escape
+    shell_escape = require("lapis.cmd.path").shell_escape
+    local autoload
+    autoload = require("lapis.util").autoload
+    local loader = autoload("models")
     local models = { }
-    error("not implemented yet")
+    for file in io.popen("find models/ -type f \\( -name '*.lua' -o -name '*.moon' \\)"):lines() do
+      local model_name = file:match("([^/]+)%.%w+$")
+      local model = loader[model_name]
+      if model_name and not models[model_name] then
+        models[model_name] = {
+          name = model_name
+        }
+      end
+    end
     return models
   end)
   self:add_tool({
     name = "schema",
-    title = "Get Model Schema",
-    description = "Shows the schema for a specific database model",
+    description = "Shows the SQl schema for a specific database model",
     inputSchema = {
       type = "object",
       properties = {
@@ -559,6 +589,9 @@ do
       required = {
         "model_name"
       }
+    },
+    annotations = {
+      title = "Get Model Schema"
     }
   }, function(self, params)
     local model_name = params.model_name

@@ -75,7 +75,7 @@ with_initialized = (fn) ->
 
 -- Base MCP server class that can be extended
 class McpServer
-  @server_name: "lapis-mcp"
+  -- @server_name: "lapis-mcp"
   @server_version: "1.0.0"
   @server_vendor: "Lapis"
 
@@ -88,9 +88,9 @@ class McpServer
 
     tool_def = {
       name: details.name
-      title: details.title
       description: details.description
       inputSchema: details.inputSchema
+      annotations: details.annotations
       handler: call_fn
     }
 
@@ -159,6 +159,8 @@ class McpServer
         @handle_tools_list message
       when "tools/call"
         @handle_tools_call message
+      when "ping"
+        @handle_ping message
       else
         @debug_log "warning", "Unknown method: #{message.method}"
         {
@@ -212,16 +214,21 @@ class McpServer
     {
       jsonrpc: "2.0"
       id: message.id
-      result: {
-        protocolVersion: @protocol_version
-        capabilities: @server_capabilities
-        serverInfo: {
-          name: @@server_name
-          version: @@server_version
-          vendor: @@server_vendor
-        }
-      }
+      result: @server_specification!
     }
+
+  server_specification: =>
+    {
+      protocolVersion: @protocol_version
+      capabilities: @server_capabilities
+      serverInfo: {
+        name: @@server_name or @@__name
+        version: @@server_version
+        vendor: @@server_vendor
+      }
+      instructions: @@instructions
+    }
+
 
   handle_tools_call: with_initialized (message) =>
     tool_name = message.params.name
@@ -334,7 +341,6 @@ class McpServer
     tools_list = for name, tool in pairs @get_all_tools!
       {
         name: tool.name
-        title: tool.title
         description: tool.description
         inputSchema: tool.inputSchema
         annotations: tool.annotations
@@ -348,6 +354,15 @@ class McpServer
       result: {
         tools: tools_list
       }
+    }
+
+  -- Handle ping message
+  handle_ping: (message) =>
+    @debug_log "debug", "Received ping request"
+    {
+      jsonrpc: "2.0"
+      id: message.id
+      result: {}
     }
 
   --- called to cancel a running job
@@ -383,18 +398,23 @@ class McpServer
 
 -- Lapis-specific MCP server implementation
 class LapisMcpServer extends McpServer
+  @server_name: "lapis-mcp"
+  @instructions: [[Tools to query information about the Lapis web application located in the current directory]]
+
   new: (@app, options = {}) =>
     super(options)
 
   -- Register the built-in Lapis tools
   @add_tool {
-    name: "routes"
-    title: "List Routes"
+    name: "list_routes"
     description: "Lists all named routes in the Lapis application"
     inputSchema: {
       type: "object"
       properties: {}
       required: setmetatable {}, json.array_mt
+    }
+    annotations: {
+      title: "List Routes"
     }
   }, (params) =>
     routes = {}
@@ -408,24 +428,38 @@ class LapisMcpServer extends McpServer
     tuples
 
   @add_tool {
-    name: "models"
-    title: "List Models"
-    description: "Lists all database models defined in the application"
+    name: "list_models"
+    description: "Lists all database models defined in the application. A model is a class that represents a database table."
     inputSchema: {
       type: "object"
       properties: {}
       required: setmetatable {}, json.array_mt
     }
-
+    annotations: {
+      title: "List Models"
+    }
   }, (params) =>
+    import shell_escape from require "lapis.cmd.path"
+    import autoload from require "lapis.util"
+
+    loader = autoload "models"
+
     models = {}
-    error("not implemented yet")
+
+    for file in io.popen("find models/ -type f \\( -name '*.lua' -o -name '*.moon' \\)")\lines!
+      model_name = file\match("([^/]+)%.%w+$")
+      model = loader[model_name]
+
+      if model_name and not models[model_name]
+        models[model_name] = {
+          name: model_name
+        }
+
     models
 
   @add_tool {
     name: "schema"
-    title: "Get Model Schema"
-    description: "Shows the schema for a specific database model"
+    description: "Shows the SQl schema for a specific database model"
     inputSchema: {
       type: "object"
       properties: {
@@ -435,6 +469,9 @@ class LapisMcpServer extends McpServer
         }
       }
       required: {"model_name"}
+    }
+    annotations: {
+      title: "Get Model Schema"
     }
   }, (params) =>
     model_name = params.model_name
