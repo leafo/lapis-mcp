@@ -224,11 +224,13 @@ do
       end
       self.server_capabilities.tools = { }
       local tools = self:get_all_tools()
+      local count = 0
       for name, tool in pairs(tools) do
         self.server_capabilities.tools[name] = true
+        count = count + 1
       end
       self.initialized = true
-      self:debug_log("success", "Server initialized successfully with " .. tostring(#tools) .. " tools")
+      self:debug_log("success", "Server initialized successfully with " .. tostring(count) .. " tools")
       return {
         jsonrpc = "2.0",
         id = message.id,
@@ -361,7 +363,8 @@ do
             name = tool.name,
             title = tool.title,
             description = tool.description,
-            inputSchema = tool.inputSchema
+            inputSchema = tool.inputSchema,
+            annotations = tool.annotations
           }
           _len_0 = _len_0 + 1
         end
@@ -502,7 +505,7 @@ do
     inputSchema = {
       type = "object",
       properties = { },
-      required = json.empty_array
+      required = setmetatable({ }, json.array_mt)
     }
   }, function(self, params)
     local routes = { }
@@ -534,7 +537,7 @@ do
     inputSchema = {
       type = "object",
       properties = { },
-      required = json.empty_array
+      required = setmetatable({ }, json.array_mt)
     }
   }, function(self, params)
     local models = { }

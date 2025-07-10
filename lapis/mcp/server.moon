@@ -79,7 +79,8 @@ class McpServer
   @server_version: "1.0.0"
   @server_vendor: "Lapis"
 
-  -- Class method to add tools to the server
+  -- add tool to the server
+  -- https://modelcontextprotocol.io/docs/concepts/tools#tool-definition-structure
   @add_tool: (details, call_fn) =>
     -- Initialize tools registry on this class if it doesn't exist
     unless rawget(@, "tools")
@@ -200,11 +201,13 @@ class McpServer
     -- Set up server capabilities based on available tools
     @server_capabilities.tools = {}
     tools = @get_all_tools!
+    count = 0
     for name, tool in pairs(tools)
       @server_capabilities.tools[name] = true
+      count += 1
 
     @initialized = true
-    @debug_log "success", "Server initialized successfully with #{#tools} tools"
+    @debug_log "success", "Server initialized successfully with #{count} tools"
 
     {
       jsonrpc: "2.0"
@@ -334,6 +337,7 @@ class McpServer
         title: tool.title
         description: tool.description
         inputSchema: tool.inputSchema
+        annotations: tool.annotations
       }
 
     table.sort tools_list, (a, b) -> a.name < b.name
@@ -390,7 +394,7 @@ class LapisMcpServer extends McpServer
     inputSchema: {
       type: "object"
       properties: {}
-      required: json.empty_array
+      required: setmetatable {}, json.array_mt
     }
   }, (params) =>
     routes = {}
@@ -410,8 +414,9 @@ class LapisMcpServer extends McpServer
     inputSchema: {
       type: "object"
       properties: {}
-      required: json.empty_array
+      required: setmetatable {}, json.array_mt
     }
+
   }, (params) =>
     models = {}
     error("not implemented yet")
