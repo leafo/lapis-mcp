@@ -1,23 +1,10 @@
 import LapisMcpServer from require "lapis.mcp.lapis_server"
-import StdioTransport from require "lapis.mcp.server"
+import McpServer, StdioTransport from require "lapis.mcp.server"
 
 describe "McpServer", ->
-  local mock_app, server
-
-  before_each ->
-    mock_app = ->
-      router: {
-        named_routes: {
-          root: { "/", "GET" }
-          users: { "/users", "GET" }
-          user: { "/users/:id", "GET" }
-        }
-        build: ->
-      }
-    server = LapisMcpServer(mock_app, {})
-
   describe "initialization", ->
     it "should create server with proper defaults", ->
+      server = McpServer({})
       assert.is_not_nil server
       assert.equal "2025-06-18", server.protocol_version
       assert.is_false server.initialized
@@ -27,35 +14,8 @@ describe "McpServer", ->
       assert.is_table server.server_capabilities
       assert.is_table server.client_capabilities
 
-    it "should have expected tools configured", ->
-      tools = server\get_all_tools!
-
-      assert.is_not_nil tools.list_routes
-      assert.is_not_nil tools.list_models
-      assert.is_not_nil tools.schema
-
-      -- Check list_routes tool structure
-      list_routes_tool = tools.list_routes
-
-      assert.equal "list_routes", list_routes_tool.name
-      assert.equal "List Routes", list_routes_tool.annotations.title
-      assert.is_string list_routes_tool.description
-      assert.is_table list_routes_tool.inputSchema
-
-  describe "find_tool", ->
-    it "should find tools in current class", ->
-      tool = server\find_tool("list_routes")
-      assert.is_not_nil tool
-      assert.equal "list_routes", tool.name
-      assert.equal "List Routes", tool.annotations.title
-
-    it "should return nil for non-existent tools", ->
-      tool = server\find_tool("nonexistent")
-      assert.is_nil tool
-
+  describe "tool inheritance", ->
     it "should handle inheritance chains", ->
-      import McpServer from require "lapis.mcp.server"
-
       -- Create base class with tools
       class BaseServer extends McpServer
         @add_tool {
@@ -127,8 +87,6 @@ describe "McpServer", ->
       assert.equal "Final Tool", final_tool.annotations.title
 
     it "should respect tool overriding in inheritance", ->
-      import McpServer from require "lapis.mcp.server"
-
       -- Create base class with tools
       class BaseServer extends McpServer
         @add_tool {
@@ -168,8 +126,6 @@ describe "McpServer", ->
       assert.equal "Original tool", base_tool.description
 
     it "should find first matching tool in search order", ->
-      import McpServer from require "lapis.mcp.server"
-
       -- Create class with multiple tools with different names
       class MultiToolServer extends McpServer
         @add_tool {
@@ -215,8 +171,6 @@ describe "McpServer", ->
       assert.equal "Third Tool", third.annotations.title
 
     it "should handle complex inheritance with multiple overrides", ->
-      import McpServer from require "lapis.mcp.server"
-
       -- Create a complex inheritance chain
       class GrandParent extends McpServer
         @add_tool {
@@ -296,6 +250,58 @@ describe "McpServer", ->
       tool_d = child_server\find_tool("tool-d")
       assert.is_not_nil tool_d
       assert.equal "Tool D (Child)", tool_d.annotations.title
+
+describe "LapisMcpServer", ->
+  local mock_app, server
+
+  before_each ->
+    mock_app = ->
+      router: {
+        named_routes: {
+          root: { "/", "GET" }
+          users: { "/users", "GET" }
+          user: { "/users/:id", "GET" }
+        }
+        build: ->
+      }
+    server = LapisMcpServer(mock_app, {})
+
+  describe "initialization", ->
+    it "should create Lapis server with proper defaults", ->
+      assert.is_not_nil server
+      assert.equal "2025-06-18", server.protocol_version
+      assert.is_false server.initialized
+      assert.is_false server.debug
+      tools = server\get_all_tools!
+      assert.is_table tools
+      assert.is_table server.server_capabilities
+      assert.is_table server.client_capabilities
+
+    it "should have Lapis-specific tools configured", ->
+      tools = server\get_all_tools!
+
+      assert.is_not_nil tools.list_routes
+      assert.is_not_nil tools.list_models
+      assert.is_not_nil tools.schema
+
+      -- Check list_routes tool structure
+      list_routes_tool = tools.list_routes
+
+      assert.equal "list_routes", list_routes_tool.name
+      assert.equal "List Routes", list_routes_tool.annotations.title
+      assert.is_string list_routes_tool.description
+      assert.is_table list_routes_tool.inputSchema
+
+  describe "Lapis tool functionality", ->
+    it "should find Lapis-specific tools", ->
+      tool = server\find_tool("list_routes")
+      assert.is_not_nil tool
+      assert.equal "list_routes", tool.name
+      assert.equal "List Routes", tool.annotations.title
+
+    it "should return nil for non-existent tools", ->
+      tool = server\find_tool("nonexistent")
+      assert.is_nil tool
 
   describe "handle_initialize", ->
     it "should handle basic initialization", ->
