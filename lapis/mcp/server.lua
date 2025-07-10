@@ -239,12 +239,15 @@ do
         result = self:server_specification()
       }
     end,
+    get_server_name = function(self)
+      return self.__class.server_name or self.__class.__name
+    end,
     server_specification = function(self)
       return {
         protocolVersion = self.protocol_version,
         capabilities = self.server_capabilities,
         serverInfo = {
-          name = self.__class.server_name or self.__class.__name,
+          name = self:get_server_name(),
           version = self.__class.server_version,
           vendor = self.__class.server_vendor
         },
@@ -402,8 +405,10 @@ do
       return self:handle_message(message)
     end,
     run_stdio = function(self)
-      self:debug_log("info", "Starting MCP server in stdio mode, waiting for initialization...")
-      self.transport = StdioTransport()
+      self:debug_log("info", "Starting MCP server " .. tostring(self:get_server_name()) .. " in stdio mode, waiting for initialization...")
+      if not (self.transport) then
+        self.transport = StdioTransport()
+      end
       while true do
         local _continue_0 = false
         repeat
@@ -457,6 +462,11 @@ do
   local self = _class_0
   self.server_version = "1.0.0"
   self.server_vendor = "Lapis"
+  self.run_cli = function(self, config)
+    local run_cli
+    run_cli = require("lapis.mcp.cli").run_cli
+    return run_cli(self, config)
+  end
   self.extend = function(self, name, tbl)
     local lua = require("lapis.lua")
     if type(name) == "table" then

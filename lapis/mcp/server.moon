@@ -79,6 +79,11 @@ class McpServer
   @server_version: "1.0.0"
   @server_vendor: "Lapis"
 
+  -- Generic CLI runner using argparse
+  @run_cli: (config) =>
+    import run_cli from require "lapis.mcp.cli"
+    run_cli @, config
+
   -- utility for creating sub class when in Lua
   @extend: (name, tbl) =>
     lua = require "lapis.lua"
@@ -230,12 +235,15 @@ class McpServer
       result: @server_specification!
     }
 
+  get_server_name: =>
+    @@server_name or @@__name
+
   server_specification: =>
     {
       protocolVersion: @protocol_version
       capabilities: @server_capabilities
       serverInfo: {
-        name: @@server_name or @@__name
+        name: @get_server_name!
         version: @@server_version
         vendor: @@server_vendor
       }
@@ -391,8 +399,10 @@ class McpServer
 
   -- Server main loop
   run_stdio: =>
-    @debug_log "info", "Starting MCP server in stdio mode, waiting for initialization..."
-    @transport = StdioTransport!
+    @debug_log "info", "Starting MCP server #{@get_server_name!} in stdio mode, waiting for initialization..."
+
+    unless @transport
+      @transport = StdioTransport!
 
     -- Process messages
     while true
