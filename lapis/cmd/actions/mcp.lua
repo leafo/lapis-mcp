@@ -23,7 +23,7 @@ return {
     do
       local _with_0 = require("argparse")("lapis mcp", "Run an MCP server over stdin/out that can communicate with details of Lapis app")
       _with_0:option("--send-message", "Send a raw message by name and exit (e.g. tools/list, initialize)")
-      _with_0:option("--tool", "Immediately invoke a tool, print output and exit (e.g. routes, models, schema)")
+      _with_0:option("--tool", "Immediately invoke a tool, print output and exit (e.g. list_routes, list_models, schema)")
       _with_0:flag("--debug", "Enable debug logging to stderr")
       _with_0:flag("--skip-initialize --skip-init", "Skip the initialize stage and listen for messages immediately")
       return _with_0

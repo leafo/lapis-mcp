@@ -1,12 +1,8 @@
 # Lapis MCP
 
-A Model Context Protocol (MCP) server for the [Lapis](https://leafo.net/lapis/) web framework that provides information about the current Lapis application to AI agents.
+A libray for developing MCP servers in Lua/MoonScript. Also contains a default
+MCP server for communicating with Lapis web applications.
 
-## Features
-
-- List all named routes and their URLs
-- List all models/database tables in your application 
-- Show detailed schema for specific models
 
 ## Installation
 
@@ -14,30 +10,315 @@ A Model Context Protocol (MCP) server for the [Lapis](https://leafo.net/lapis/) 
 luarocks install lapis-mcp
 ```
 
-## Usage
+## Lapis MCP Usage
 
-Start the MCP server by running:
+This library provides a `lapis` subcommand, `mcp`, which can be used to start
+an MCP server tied to the Lapis application in the current directory.
 
-```bash
-lapis mcp
+```
+lapis _ mcp
 ```
 
-This will start an MCP server that communicates over stdin/stdout, which can be connected to by any MCP client.
+### Available Tools
 
-## Commands
+- **list_routes** - Lists all named routes in the Lapis application
+- **list_models** - Lists all database models defined in the application (classes that represent database tables)
+- **schema** - Shows the SQL schema for a specific database model (requires model_name parameter)
 
-The MCP server provides the following tools:
+The server automatically discovers routes from your application's router and models from the `models/` directory.
 
-- `routes` - Lists all named routes in your Lapis application with their URL patterns
-- `models` - Lists all models/database tables defined in your application
-- `schema <model_name>` - Shows the database schema for a specific model
+## Creating Your Own MCP Server
 
+This project provides a reusable `McpServer` base class that you can extend to create your own MCP servers. Here's how to implement your own:
 
-## Guides
+### Full Example: File System MCP Server
 
-https://modelcontextprotocol.io/specification/2025-06-18/basic/lifecycle.md
-https://modelcontextprotocol.io/specification/2025-06-18/server/tools.md
+#### Lua
 
+```lua
+local McpServer = require("lapis.mcp.server").McpServer
+local json = require("cjson.safe")
+
+local FileSystemMcpServer = McpServer:extend("FileSystemMcpServer", {
+  server_name = "filesystem-mcp",
+  instructions = "Tools to interact with the local filesystem"
+})
+
+FileSystemMcpServer:add_tool({
+  name = "list_files",
+  description = "Lists files in a directory", 
+  inputSchema = {
+    type = "object",
+    properties = {
+      path = {
+        type = "string",
+        description = "Directory path to list",
+        default = "."
+      }
+    },
+    -- Note: must serialize to an empty array in JSON
+    required = setmetatable({}, json.array_mt)
+  }
+}, function(self, params)
+  local path = params.path or "."
+  local files = {}
+  
+  for file in io.popen("ls -la '" .. path .. "'"):lines() do
+    table.insert(files, file)
+  end
+  
+  return files
+end)
+
+-- Usage
+local server = FileSystemMcpServer({
+  debug = true
+})
+server:run_stdio()
+```
+
+#### MoonScript
+
+```moonscript
+import McpServer from require "lapis.mcp.server"
+json = require "cjson.safe"
+
+class FileSystemMcpServer extends McpServer
+  @server_name: "filesystem-mcp"
+  @instructions: [[Tools to interact with the local filesystem]]
+
+  @add_tool {
+    name: "list_files"
+    description: "Lists files in a directory"
+    inputSchema: {
+      type: "object"
+      properties: {
+        path: {
+          type: "string"
+          description: "Directory path to list"
+          default: "."
+        }
+      }
+      -- Note: must serialize to an empty array in JSON
+      required: setmetatable {}, json.array_mt
+    }
+  }, (params) =>
+    path = params.path or "."
+    files = {}
+
+    for file in io.popen("ls -la '#{path}'")\lines()
+      table.insert(files, file)
+
+    files
+
+-- Usage
+server = FileSystemMcpServer {
+  debug: true
+}
+server\run_stdio!
+```
+
+### Basic Structure
+
+#### Lua
+
+```lua
+-- Import the base class
+local McpServer = require("lapis.mcp.server").McpServer
+
+-- Create your custom server class
+local MyMcpServer = McpServer:extend("MyMcpServer", {
+  server_name = "my-mcp-server",
+  server_version = "1.0.0", 
+  server_vendor = "Your Company",
+  instructions = "Your server description here"
+})
+
+-- Usage
+local server = MyMcpServer({debug = true})
+server:run_stdio()
+```
+
+#### MoonScript
+
+```moonscript
+-- Import the base class
+import McpServer from require "lapis.mcp.server"
+
+-- Create your custom server class
+class MyMcpServer extends McpServer
+  @server_name: "my-mcp-server"
+  @server_version: "1.0.0"
+  @server_vendor: "Your Company"
+  @instructions: [[Your server description here]]
+
+  new: (options = {}) =>
+    super(options)
+    -- Initialize your server-specific state
+```
+
+### Adding Tools
+
+Use the `@add_tool` class method to register tools:
+
+#### Lua
+
+```lua
+-- Add a simple tool
+MyMcpServer:add_tool({
+  name = "hello",
+  description = "Returns a greeting message",
+  inputSchema = {
+    type = "object",
+    properties = {
+      name = {
+        type = "string",
+        description = "Name to greet"
+      }
+    },
+    required = {"name"}
+  },
+  annotations = {
+    title = "Say Hello"
+  }
+}, function(self, params)
+  return "Hello, " .. params.name .. "!"
+end)
+
+-- Add a tool with no parameters
+MyMcpServer:add_tool({
+  name = "status",
+  description = "Returns server status",
+  inputSchema = {
+    type = "object",
+    properties = {},
+    required = setmetatable({}, json.array_mt)  -- Empty array for no required params
+  },
+  annotations = {
+    title = "Server Status"
+  }
+}, function(self, params)
+  return {
+    status = "running",
+    timestamp = os.time()
+  }
+end)
+```
+
+#### MoonScript
+
+```moonscript
+-- Add a simple tool
+@add_tool {
+  name: "hello"
+  description: "Returns a greeting message"
+  inputSchema: {
+    type: "object"
+    properties: {
+      name: {
+        type: "string"
+        description: "Name to greet"
+      }
+    }
+    required: {"name"}
+  }
+  annotations: {
+    title: "Say Hello"
+  }
+}, (params) =>
+  "Hello, #{params.name}!"
+
+-- Add a tool with no parameters
+@add_tool {
+  name: "status"
+  description: "Returns server status"
+  inputSchema: {
+    type: "object"
+    properties: {}
+    required: setmetatable {}, json.array_mt  -- Empty array for no required params
+  }
+  annotations: {
+    title: "Server Status"
+  }
+}, (params) =>
+  {
+    status: "running"
+    timestamp: os.time()
+  }
+```
+
+### Error Handling
+
+Tools can return errors using the `nil, error_message` pattern:
+
+#### Lua
+
+```lua
+MyMcpServer:add_tool({
+  name = "divide",
+  description = "Divides two numbers",
+  inputSchema = {
+    type = "object",
+    properties = {
+      a = { type = "number" },
+      b = { type = "number" }
+    },
+    required = {"a", "b"}
+  }
+}, function(self, params)
+  if params.b == 0 then
+    return nil, "Division by zero is not allowed"
+  end
+  
+  return params.a / params.b
+end)
+```
+
+#### MoonScript
+
+```moonscript
+@add_tool {
+  name: "divide"
+  description: "Divides two numbers"
+  inputSchema: {
+    type: "object"
+    properties: {
+      a: { type: "number" }
+      b: { type: "number" }
+    }
+    required: {"a", "b"}
+  }
+}, (params) =>
+  if params.b == 0
+    return nil, "Division by zero is not allowed"
+
+  params.a / params.b
+```
+
+### Running Your Server
+
+#### Lua
+
+```lua
+-- Create and run your server
+local server = MyMcpServer({debug = true})
+server:run_stdio()
+```
+
+#### MoonScript
+
+```moonscript
+-- Create and run your server
+server = MyMcpServer({debug: true})
+server\run_stdio()
+```
+
+### Key Features
+
+- **Inheritance-based tool registration** - Tools are inherited from parent classes, with the ability for subclasses to override tools by name
+- **Error handling** - Both exceptions and explicit error returns are handled
+- **Debug logging** - Optional debug output with colored console logging
+- **MCP protocol compliance** - Follows the MCP 2025-06-18 specification
 
 ## License
 

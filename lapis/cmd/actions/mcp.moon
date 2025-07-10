@@ -25,7 +25,7 @@ find_lapis_application = (config) ->
   argparser: ->
     with require("argparse") "lapis mcp", "Run an MCP server over stdin/out that can communicate with details of Lapis app"
       \option "--send-message", "Send a raw message by name and exit (e.g. tools/list, initialize)"
-      \option "--tool", "Immediately invoke a tool, print output and exit (e.g. routes, models, schema)"
+      \option "--tool", "Immediately invoke a tool, print output and exit (e.g. list_routes, list_models, schema)"
       \flag "--debug", "Enable debug logging to stderr"
       \flag "--skip-initialize --skip-init", "Skip the initialize stage and listen for messages immediately"
 

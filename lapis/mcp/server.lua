@@ -457,6 +457,16 @@ do
   local self = _class_0
   self.server_version = "1.0.0"
   self.server_vendor = "Lapis"
+  self.extend = function(self, name, tbl)
+    local lua = require("lapis.lua")
+    if type(name) == "table" then
+      tbl = name
+      name = nil
+    end
+    local class_fields = { }
+    local cls = lua.class(name or "McpServer", tbl, self)
+    return cls, cls.__base
+  end
   self.add_tool = function(self, details, call_fn)
     if not (rawget(self, "tools")) then
       rawset(self, "tools", { })

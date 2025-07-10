@@ -79,6 +79,19 @@ class McpServer
   @server_version: "1.0.0"
   @server_vendor: "Lapis"
 
+  -- utility for creating sub class when in Lua
+  @extend: (name, tbl) =>
+    lua = require "lapis.lua"
+
+    if type(name) == "table"
+      tbl = name
+      name = nil
+
+    class_fields = { }
+
+    cls = lua.class name or "McpServer", tbl, @
+    cls, cls.__base
+
   -- add tool to the server
   -- https://modelcontextprotocol.io/docs/concepts/tools#tool-definition-structure
   @add_tool: (details, call_fn) =>
