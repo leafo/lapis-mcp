@@ -1,5 +1,7 @@
-import LapisMcpServer  from require "lapis.mcp.lapis_server"
-json = require "cjson"
+import LapisMcpServer from require "lapis.mcp.lapis_server"
+json = require "cjson.safe"
+
+CLIENT_NAME = "lapis-mcp-cli"
 
 -- Helper functions outside the class
 find_lapis_application = (config) ->
@@ -19,13 +21,13 @@ find_lapis_application = (config) ->
 
   error("Could not find a Lapis application")
 
-
 -- Command-line interface for the MCP server
 {
   argparser: ->
     with require("argparse") "lapis mcp", "Run an MCP server over stdin/out that can communicate with details of Lapis app"
-      \option "--send-message", "Send a raw message by name and exit (e.g. tools/list, initialize)"
-      \option "--tool", "Immediately invoke a tool, print output and exit (e.g. list_routes, list_models, schema)"
+      \option "--send-message", "Send a raw message by name and exit (e.g. tools/list, initialize or a JSON object)"
+      \option "--tool", "Immediately invoke a tool, print output and exit"
+      \option "--tool-argument --arg", "Argument object to pass for tool call (in JSON format)"
       \flag "--debug", "Enable debug logging to stderr"
       \flag "--skip-initialize --skip-init", "Skip the initialize stage and listen for messages immediately"
 
@@ -35,32 +37,13 @@ find_lapis_application = (config) ->
 
     server = LapisMcpServer(app, {debug: args.debug})
 
-    if args.skip_initialize
-      server.initialized = true
-
-    -- Handle --tool argument
+    -- Handle --tool immediate invocation
     if args.tool
+      server\skip_initialize!
       tool_name = args.tool
 
-      -- First initialize the server
-      init_message = {
-        jsonrpc: "2.0"
-        id: "init-#{os.time!}"
-        method: "initialize"
-        params: {
-          protocolVersion: "2025-06-18"
-          capabilities: {}
-          clientInfo: {
-            name: "lapis-mcp-cli"
-            version: "0.1.0"
-          }
-        }
-      }
-
-      init_response = server\send_message(init_message)
-      if init_response.error
-        print "Error initializing server: #{json.encode(init_response.error)}"
-        return
+      arguments = if args.tool_argument
+        assert json.decode args.tool_argument
 
       -- Create a tool call message
       message = {
@@ -69,7 +52,7 @@ find_lapis_application = (config) ->
         method: "tools/call"
         params: {
           name: tool_name
-          arguments: {}
+          :arguments
         }
       }
 
@@ -84,59 +67,43 @@ find_lapis_application = (config) ->
       return
 
     -- Handle --send-message argument
-    elseif args.send_message
-      message_type = args.send_message
-
-      -- Initialize first for all messages
-      init_message = {
-        jsonrpc: "2.0"
-        id: "init-#{os.time!}"
-        method: "initialize"
-        params: {
-          protocolVersion: "2025-06-18"
-          capabilities: {}
-          clientInfo: {
-            name: "lapis-mcp-cli"
-            version: "0.1.0"
+    if args.send_message
+      message = switch args.send_message
+        when "tools/list"
+          server\skip_initialize!
+          {
+            jsonrpc: "2.0"
+            id: "cmd-line-#{os.time!}"
+            method: "tools/list"
           }
-        }
-      }
-
-      init_response = server\send_message(init_message)
-      if init_response.error
-        print "Error initializing server: #{json.encode(init_response.error)}"
-        return
-
-      -- Create message based on type
-      message = nil
-      if message_type == "tools/list"
-        message = {
-          jsonrpc: "2.0"
-          id: "cmd-line-#{os.time!}"
-          method: "tools/list"
-        }
-      elseif message_type == "initialize"
-        -- Already handled above, just return the init response
-        print json.encode(init_response)
-        return
-      else
-        -- Assume it's a tool call
-        message = {
-          jsonrpc: "2.0"
-          id: "cmd-line-#{os.time!}"
-          method: "tools/call"
-          params: {
-            name: message_type
-            arguments: {}
+        when "initialize"
+          -- Handle initialize message specially
+          {
+            jsonrpc: "2.0"
+            id: "init-#{os.time!}"
+            method: "initialize"
+            params: {
+              protocolVersion: "2025-06-18"
+              capabilities: {}
+              clientInfo: {
+                name: CLIENT_NAME
+                version: "1.0.0"
+              }
+            }
           }
-        }
+        else
+          server\skip_initialize!
+          -- try to parse message as JSON object
+          assert json.decode args.send_message
 
       -- Send message and get response
-      response = server\send_message(message)
-
-      -- Output response as JSON
-      print json.encode(response)
+      response = server\send_message message
+      print json.encode response
       return
+
+    -- Skip initialization when using immediate invocation flags or when explicitly requested
+    if args.skip_initialize or args.tool
+      server\skip_initialize!
 
     -- Run server normally
     server\run_stdio!
