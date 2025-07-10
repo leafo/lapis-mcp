@@ -139,6 +139,12 @@ class McpServer
     timestamp = os.date("%H:%M:%S")
     io.stderr\write colors "#{color}[#{timestamp}] #{level\upper!}: #{message}%{reset}\n"
 
+  -- Skip initialization and mark server as initialized
+  skip_initialize: =>
+    return nil, "Server already initialized" if @initialized
+    @initialized = true
+    @debug_log "info", "Skipping initialization"
+    @initialized
 
   find_tool: (name) =>
     -- Search up the inheritance chain for the tool
@@ -399,7 +405,13 @@ class McpServer
 
   -- Server main loop
   run_stdio: =>
-    @debug_log "info", "Starting MCP server #{@get_server_name!} in stdio mode, waiting for initialization..."
+    @debug_log "info", table.concat {
+      "Starting MCP server #{@get_server_name!} in stdio mode"
+      if @initialized
+        ", ready for messages"
+      else
+        ", waiting for initialization..."
+    }
 
     unless @transport
       @transport = StdioTransport!

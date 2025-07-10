@@ -1,5 +1,7 @@
 -- CLI utilities for MCP servers
-json = require "cjson"
+json = require "cjson.safe"
+
+CLIENT_NAME = "lapis-mcp-cli"
 
 -- Generic CLI runner using argparse
 run_cli = (ServerClass, config={}) ->
@@ -9,8 +11,10 @@ run_cli = (ServerClass, config={}) ->
   
   -- Create argument parser
   parser = argparse name, "Start an MCP server over stdin/stdout"
-  parser\option "--send-message", "Send a raw message by name and exit (e.g. tools/list, initialize)"
+  parser\option "--send-message", "Send a raw message by name and exit (e.g. tools/list, initialize or a JSON object)"
   parser\option "--tool", "Immediately invoke a tool, print output and exit"
+  parser\option "--tool-argument --arg", "Argument object to pass for tool cool (in JSON format)"
+
   parser\flag "--debug", "Enable debug logging to stderr"
   parser\flag "--skip-initialize --skip-init", "Skip the initialize stage and listen for messages immediately"
   
@@ -22,33 +26,13 @@ run_cli = (ServerClass, config={}) ->
     debug: args.debug
   }
 
-  if args.skip_initialize
-    server.initialized = true
-    @debug_log "info", "Skipping initialization"
-
-  -- Handle --tool argument
+  -- Handle --tool immediate invocation
   if args.tool
+    server\skip_initialize!
     tool_name = args.tool
 
-    -- First initialize the server
-    init_message = {
-      jsonrpc: "2.0"
-      id: "init-#{os.time!}"
-      method: "initialize"
-      params: {
-        protocolVersion: "2025-06-18"
-        capabilities: {}
-        clientInfo: {
-          name: "mcp-cli"
-          version: "1.0.0"
-        }
-      }
-    }
-
-    init_response = server\send_message(init_message)
-    if init_response.error
-      print "Error initializing server: #{json.encode(init_response.error)}"
-      return
+    arguments = if args.tool_argument
+      assert json.decode args.tool_argument
 
     -- Create a tool call message
     message = {
@@ -57,7 +41,7 @@ run_cli = (ServerClass, config={}) ->
       method: "tools/call"
       params: {
         name: tool_name
-        arguments: {}
+        :arguments
       }
     }
 
@@ -72,59 +56,43 @@ run_cli = (ServerClass, config={}) ->
     return
 
   -- Handle --send-message argument
-  elseif args.send_message
-    message_type = args.send_message
-
-    -- Initialize first for all messages
-    init_message = {
-      jsonrpc: "2.0"
-      id: "init-#{os.time!}"
-      method: "initialize"
-      params: {
-        protocolVersion: "2025-06-18"
-        capabilities: {}
-        clientInfo: {
-          name: "mcp-cli"
-          version: "1.0.0"
+  if args.send_message
+    message = switch args.send_message
+      when "tools/list"
+        server\skip_initialize!
+        {
+          jsonrpc: "2.0"
+          id: "cmd-line-#{os.time!}"
+          method: "tools/list"
         }
-      }
-    }
-
-    init_response = server\send_message(init_message)
-    if init_response.error
-      print "Error initializing server: #{json.encode(init_response.error)}"
-      return
-
-    -- Create message based on type
-    message = nil
-    if message_type == "tools/list"
-      message = {
-        jsonrpc: "2.0"
-        id: "cmd-line-#{os.time!}"
-        method: "tools/list"
-      }
-    elseif message_type == "initialize"
-      -- Already handled above, just return the init response
-      print json.encode(init_response)
-      return
-    else
-      -- Assume it's a tool call
-      message = {
-        jsonrpc: "2.0"
-        id: "cmd-line-#{os.time!}"
-        method: "tools/call"
-        params: {
-          name: message_type
-          arguments: {}
+      when "initialize"
+        -- Handle initialize message specially
+        {
+          jsonrpc: "2.0"
+          id: "init-#{os.time!}"
+          method: "initialize"
+          params: {
+            protocolVersion: "2025-06-18"
+            capabilities: {}
+            clientInfo: {
+              name: CLIENT_NAME
+              version: "1.0.0"
+            }
+          }
         }
-      }
+      else
+        server\skip_initialize!
+        -- try to parse message as JSON objectd
+        assert json.decode args.send_message
 
     -- Send message and get response
-    response = server\send_message(message)
-
-    -- Output response as JSON
-    print json.encode(response)
+    response = server\send_message message
+    print json.encode response
     return
+
+  -- Skip initialization when using immediate invocation flags or when explicitly requested
+  if args.skip_initialize or args.tool
+    server\skip_initialize!
 
   -- Run server normally
   server\run_stdio!

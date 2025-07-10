@@ -152,6 +152,14 @@ do
       local timestamp = os.date("%H:%M:%S")
       return io.stderr:write(colors(tostring(color) .. "[" .. tostring(timestamp) .. "] " .. tostring(level:upper()) .. ": " .. tostring(message) .. "%{reset}\n"))
     end,
+    skip_initialize = function(self)
+      if self.initialized then
+        return nil, "Server already initialized"
+      end
+      self.initialized = true
+      self:debug_log("info", "Skipping initialization")
+      return self.initialized
+    end,
     find_tool = function(self, name)
       local current_class = self.__class
       while current_class do
@@ -405,7 +413,16 @@ do
       return self:handle_message(message)
     end,
     run_stdio = function(self)
-      self:debug_log("info", "Starting MCP server " .. tostring(self:get_server_name()) .. " in stdio mode, waiting for initialization...")
+      self:debug_log("info", table.concat({
+        "Starting MCP server " .. tostring(self:get_server_name()) .. " in stdio mode",
+        (function()
+          if self.initialized then
+            return ", ready for messages"
+          else
+            return ", waiting for initialization..."
+          end
+        end)()
+      }))
       if not (self.transport) then
         self.transport = StdioTransport()
       end
