@@ -1,4 +1,5 @@
-import LapisMcpServer, StdioTransport from require "lapis.mcp.server"
+import LapisMcpServer from require "lapis.mcp.lapis_server"
+import StdioTransport from require "lapis.mcp.server"
 
 describe "McpServer", ->
   local mock_app, server

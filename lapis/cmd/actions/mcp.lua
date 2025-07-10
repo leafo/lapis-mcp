@@ -1,5 +1,5 @@
 local LapisMcpServer
-LapisMcpServer = require("lapis.mcp.server").LapisMcpServer
+LapisMcpServer = require("lapis.mcp.lapis_server").LapisMcpServer
 local json = require("cjson")
 local find_lapis_application
 find_lapis_application = function(config)

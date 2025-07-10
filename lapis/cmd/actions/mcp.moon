@@ -1,4 +1,4 @@
-import LapisMcpServer  from require "lapis.mcp.server"
+import LapisMcpServer  from require "lapis.mcp.lapis_server"
 json = require "cjson"
 
 -- Helper functions outside the class
