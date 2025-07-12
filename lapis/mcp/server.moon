@@ -224,16 +224,8 @@ class McpServer
         }
       }
 
-    -- Set up server capabilities based on available tools
-    @server_capabilities.tools = {}
-    tools = @get_all_tools!
-    count = 0
-    for name, tool in pairs(tools)
-      @server_capabilities.tools[name] = true
-      count += 1
-
     @initialized = true
-    @debug_log "success", "Server initialized successfully with #{count} tools"
+    @debug_log "success", "Server initialized"
 
     {
       jsonrpc: "2.0"
