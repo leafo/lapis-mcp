@@ -110,19 +110,67 @@ class McpServer
       inputSchema: details.inputSchema
       annotations: details.annotations
       handler: call_fn
+      hidden: details.hidden or false
     }
 
     -- Insert tool into array
     table.insert(rawget(@, "tools"), tool_def)
 
+  -- send tools list changed notification
+  notify_tools_list_changed: =>
+    return unless @initialized
+
+    notification = {
+      jsonrpc: "2.0"
+      method: "notifications/tools/list_changed"
+    }
+
+    @write_json_chunk notification
+    @debug_log "info", "Sent tools/list_changed notification"
+
+  -- set tool visibility on this instance
+  -- tool_name can be a string (with visible param) or a table of name: visibility pairs
+  set_tool_visibility: (tool_name, visible) =>
+    changed_count = 0
+
+    if type(tool_name) == "table"
+      -- Table mode: tool_name is {name: visibility, ...}
+      for name, vis in pairs tool_name
+        old_visibility = @tool_visibility[name]
+        @tool_visibility[name] = vis
+        if old_visibility != vis
+          changed_count += 1
+    else
+      -- Single tool mode
+      old_visibility = @tool_visibility[tool_name]
+      @tool_visibility[tool_name] = visible
+      if old_visibility != visible
+        changed_count += 1
+
+    -- Send notification if any visibility actually changed
+    if changed_count > 0
+      @notify_tools_list_changed!
+      true
+
+  -- unhide a tool by name
+  unhide_tool: (tool_name) =>
+    @set_tool_visibility tool_name, true
+
+  -- hide a tool by name
+  hide_tool: (tool_name) =>
+    @set_tool_visibility tool_name, false
+
   new: (options = {}) =>
     @debug = options.debug or false
     @protocol_version = "2025-06-18"
     @server_capabilities = {
-      tools: {}
+      tools: {
+        listChanged: true
+      }
     }
     @client_capabilities = {}
     @initialized = false
+    @tool_visibility = {}
 
   -- Debug logging helper
   debug_log: (level, message) =>
@@ -328,6 +376,9 @@ class McpServer
       }
 
     @debug_log "success", "Tool executed successfully: #{tool_name}"
+
+
+
     return {
       jsonrpc: "2.0"
       id: message.id
@@ -362,6 +413,13 @@ class McpServer
   -- Get tools list response (for API and testing)
   handle_tools_list: with_initialized (message) =>
     tools_list = for name, tool in pairs @get_all_tools!
+      -- Check instance visibility override first, then tool default
+      is_visible = if @tool_visibility[tool.name] != nil
+        @tool_visibility[tool.name]
+      else
+        not tool.hidden
+
+      continue unless is_visible
       {
         name: tool.name
         description: tool.description

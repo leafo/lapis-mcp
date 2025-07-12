@@ -130,6 +130,45 @@ local McpServer
 do
   local _class_0
   local _base_0 = {
+    notify_tools_list_changed = function(self)
+      if not (self.initialized) then
+        return 
+      end
+      local notification = {
+        jsonrpc = "2.0",
+        method = "notifications/tools/list_changed"
+      }
+      self:write_json_chunk(notification)
+      return self:debug_log("info", "Sent tools/list_changed notification")
+    end,
+    set_tool_visibility = function(self, tool_name, visible)
+      local changed_count = 0
+      if type(tool_name) == "table" then
+        for name, vis in pairs(tool_name) do
+          local old_visibility = self.tool_visibility[name]
+          self.tool_visibility[name] = vis
+          if old_visibility ~= vis then
+            changed_count = changed_count + 1
+          end
+        end
+      else
+        local old_visibility = self.tool_visibility[tool_name]
+        self.tool_visibility[tool_name] = visible
+        if old_visibility ~= visible then
+          changed_count = changed_count + 1
+        end
+      end
+      if changed_count > 0 then
+        self:notify_tools_list_changed()
+        return true
+      end
+    end,
+    unhide_tool = function(self, tool_name)
+      return self:set_tool_visibility(tool_name, true)
+    end,
+    hide_tool = function(self, tool_name)
+      return self:set_tool_visibility(tool_name, false)
+    end,
     debug_log = function(self, level, message)
       if not (self.debug) then
         return 
@@ -232,15 +271,8 @@ do
           }
         }
       end
-      self.server_capabilities.tools = { }
-      local tools = self:get_all_tools()
-      local count = 0
-      for name, tool in pairs(tools) do
-        self.server_capabilities.tools[name] = true
-        count = count + 1
-      end
       self.initialized = true
-      self:debug_log("success", "Server initialized successfully with " .. tostring(count) .. " tools")
+      self:debug_log("success", "Server initialized")
       return {
         jsonrpc = "2.0",
         id = message.id,
@@ -344,7 +376,14 @@ do
           content = {
             {
               type = "text",
-              text = json.encode(result_or_error)
+              text = (function()
+                local _exp_0 = type(result_or_error)
+                if "string" == _exp_0 then
+                  return result_or_error
+                else
+                  return json.encode(result_or_error) or result_or_error
+                end
+              end)()
             }
           },
           isError = false
@@ -376,13 +415,31 @@ do
         local _accum_0 = { }
         local _len_0 = 1
         for name, tool in pairs(self:get_all_tools()) do
-          _accum_0[_len_0] = {
-            name = tool.name,
-            description = tool.description,
-            inputSchema = tool.inputSchema,
-            annotations = tool.annotations
-          }
-          _len_0 = _len_0 + 1
+          local _continue_0 = false
+          repeat
+            local is_visible
+            if self.tool_visibility[tool.name] ~= nil then
+              is_visible = self.tool_visibility[tool.name]
+            else
+              is_visible = not tool.hidden
+            end
+            if not (is_visible) then
+              _continue_0 = true
+              break
+            end
+            local _value_0 = {
+              name = tool.name,
+              description = tool.description,
+              inputSchema = tool.inputSchema,
+              annotations = tool.annotations
+            }
+            _accum_0[_len_0] = _value_0
+            _len_0 = _len_0 + 1
+            _continue_0 = true
+          until true
+          if not _continue_0 then
+            break
+          end
         end
         tools_list = _accum_0
       end
@@ -460,10 +517,13 @@ do
       self.debug = options.debug or false
       self.protocol_version = "2025-06-18"
       self.server_capabilities = {
-        tools = { }
+        tools = {
+          listChanged = true
+        }
       }
       self.client_capabilities = { }
       self.initialized = false
+      self.tool_visibility = { }
     end,
     __base = _base_0,
     __name = "McpServer"
@@ -503,7 +563,8 @@ do
       description = details.description,
       inputSchema = details.inputSchema,
       annotations = details.annotations,
-      handler = call_fn
+      handler = call_fn,
+      hidden = details.hidden or false
     }
     return table.insert(rawget(self, "tools"), tool_def)
   end
