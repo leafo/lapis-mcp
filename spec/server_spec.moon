@@ -1,5 +1,14 @@
-import LapisMcpServer from require "lapis.mcp.lapis_server"
 import McpServer, StdioTransport from require "lapis.mcp.server"
+json = require "cjson"
+
+with_mock_transport = (server) ->
+  server.transport = {
+    messages: {}
+    write_json_chunk: (obj) =>
+      table.insert @messages, obj
+  }
+
+  server.transport
 
 describe "McpServer", ->
   describe "initialization", ->
@@ -13,6 +22,26 @@ describe "McpServer", ->
       assert.is_table tools
       assert.is_table server.server_capabilities
       assert.is_table server.client_capabilities
+
+  it "find_tool", ->
+    class SimpleServer extends McpServer
+      @add_tool {
+        name: "subclass-tool"
+        description: "Tool specific to subclass"
+        inputSchema: { type: "object", properties: {}, required: {} }
+        annotations: {
+          title: "Subclass Tool"
+        }
+      }, -> "subclass result"
+
+    server = SimpleServer!
+    subclass_tool = server\find_tool("subclass-tool")
+    assert.is_not_nil subclass_tool
+    assert.equal "subclass-tool", subclass_tool.name
+    assert.equal "Subclass Tool", subclass_tool.annotations.title
+    assert.equal "Tool specific to subclass", subclass_tool.description
+
+    assert.is_nil server\find_tool("nonexistent")
 
   describe "tool inheritance", ->
     it "should handle inheritance chains", ->
@@ -251,61 +280,34 @@ describe "McpServer", ->
       assert.is_not_nil tool_d
       assert.equal "Tool D (Child)", tool_d.annotations.title
 
-describe "LapisMcpServer", ->
-  local mock_app, server
+  describe "server capabilities", ->
+    it "should include listChanged in initialization response", ->
+      test_server = McpServer!
 
-  before_each ->
-    mock_app = ->
-      router: {
-        named_routes: {
-          root: { "/", "GET" }
-          users: { "/users", "GET" }
-          user: { "/users/:id", "GET" }
+      init_message = {
+        jsonrpc: "2.0"
+        id: 1
+        method: "initialize"
+        params: {
+          protocolVersion: "2025-06-18"
         }
-        build: ->
       }
-    server = LapisMcpServer(mock_app, {})
 
-  describe "initialization", ->
-    it "should create Lapis server with proper defaults", ->
-      assert.is_not_nil server
-      assert.equal "2025-06-18", server.protocol_version
-      assert.is_false server.initialized
-      assert.is_false server.debug
-      tools = server\get_all_tools!
-      assert.is_table tools
-      assert.is_table server.server_capabilities
-      assert.is_table server.client_capabilities
+      response = test_server\handle_initialize(init_message)
 
-    it "should have Lapis-specific tools configured", ->
-      tools = server\get_all_tools!
-
-      assert.is_not_nil tools.list_routes
-      assert.is_not_nil tools.list_models
-      assert.is_not_nil tools.schema
-
-      -- Check list_routes tool structure
-      list_routes_tool = tools.list_routes
-
-      assert.equal "list_routes", list_routes_tool.name
-      assert.equal "List Routes", list_routes_tool.annotations.title
-      assert.is_string list_routes_tool.description
-      assert.is_table list_routes_tool.inputSchema
-
-  describe "Lapis tool functionality", ->
-    it "should find Lapis-specific tools", ->
-      tool = server\find_tool("list_routes")
-      assert.is_not_nil tool
-      assert.equal "list_routes", tool.name
-      assert.equal "List Routes", tool.annotations.title
-
-    it "should return nil for non-existent tools", ->
-      tool = server\find_tool("nonexistent")
-      assert.is_nil tool
+      assert.same {
+        tools: {
+          listChanged: true
+        }
+      }, response.result.capabilities
 
   describe "handle_initialize", ->
+    local server
+    before_each ->
+      server = McpServer!
+
     it "should handle basic initialization", ->
-      message = {
+      response = server\handle_initialize {
         jsonrpc: "2.0"
         id: 1
         method: "initialize"
@@ -319,19 +321,28 @@ describe "LapisMcpServer", ->
         }
       }
 
-      response = server\handle_initialize(message)
+      assert.same {
+        id: 1
+        jsonrpc: "2.0"
+        result: {
+          protocolVersion: "2025-06-18"
+          capabilities: {
+            tools: {
+              listChanged: true
+            }
+          }
+          serverInfo: {
+            name: "McpServer"
+            vendor: "Lapis"
+            version: "1.0.0"
+          }
+        }
+      }, response
 
-      assert.equal "2.0", response.jsonrpc
-      assert.equal 1, response.id
-      assert.is_table response.result
-      assert.equal "2025-06-18", response.result.protocolVersion
-      assert.is_table response.result.capabilities
-      assert.is_table response.result.serverInfo
-      assert.equal "lapis-mcp", response.result.serverInfo.name
       assert.is_true server.initialized
 
     it "should reject protocol version mismatch", ->
-      message = {
+      response = server\handle_initialize {
         jsonrpc: "2.0"
         id: 1
         method: "initialize"
@@ -340,193 +351,23 @@ describe "LapisMcpServer", ->
         }
       }
 
-      response = server\handle_initialize(message)
+      assert.same {
+        jsonrpc: "2.0",
+        id: 1,
+        error: {
+          code: -32602,
+          message: "Protocol version mismatch. Server supports: 2025-06-18, client requested: 2024-01-01"
+        }
+      }, response
 
-      assert.equal "2.0", response.jsonrpc
-      assert.equal 1, response.id
-      assert.is_table response.error
-      assert.equal -32602, response.error.code
-      assert.matches "Protocol version mismatch", response.error.message
       assert.is_false server.initialized
 
-  describe "handle_tools_list", ->
-    it "should require initialization", ->
-      message = {
-        jsonrpc: "2.0"
-        id: 2
-        method: "tools/list"
-      }
-
-      response = server\handle_tools_list(message)
-
-      assert.equal "2.0", response.jsonrpc
-      assert.equal 2, response.id
-      assert.is_table response.error
-      assert.equal -32002, response.error.code
-      assert.matches "Server not initialized", response.error.message
-
-    it "should list tools after initialization", ->
-      -- First initialize
-      init_message = {
-        jsonrpc: "2.0"
-        id: 1
-        method: "initialize"
-        params: {
-          protocolVersion: "2025-06-18"
-        }
-      }
-      server\handle_initialize(init_message)
-
-      -- Then list tools
-      list_message = {
-        jsonrpc: "2.0"
-        id: 2
-        method: "tools/list"
-      }
-
-      response = server\handle_tools_list(list_message)
-
-      assert.equal "2.0", response.jsonrpc
-      assert.equal 2, response.id
-      assert.is_table response.result
-      assert.is_table response.result.tools
-      assert.equal 3, #response.result.tools
-
-      -- Check tool names
-      tool_names = {}
-      for _, tool in ipairs(response.result.tools)
-        tool_names[tool.name] = true
-
-      assert.is_true tool_names["list_routes"]
-      assert.is_true tool_names["list_models"]
-      assert.is_true tool_names["schema"]
-
-  describe "handle_tools_call", ->
-    before_each ->
-      -- Initialize server for tool calls
-      init_message = {
-        jsonrpc: "2.0"
-        id: 1
-        method: "initialize"
-        params: {
-          protocolVersion: "2025-06-18"
-        }
-      }
-      server\handle_initialize(init_message)
-
-    it "should require initialization", ->
-      uninit_server = LapisMcpServer(mock_app, {})
-      message = {
-        jsonrpc: "2.0"
-        id: 3
-        method: "tools/call"
-        params: {
-          name: "routes"
-          arguments: {}
-        }
-      }
-
-      response = uninit_server\handle_tools_call(message)
-
-      assert.equal "2.0", response.jsonrpc
-      assert.equal 3, response.id
-      assert.is_table response.error
-      assert.equal -32002, response.error.code
-
-    it "should handle unknown tool", ->
-      message = {
-        jsonrpc: "2.0"
-        id: 3
-        method: "tools/call"
-        params: {
-          name: "unknown_tool"
-          arguments: {}
-        }
-      }
-
-      response = server\handle_tools_call(message)
-
-      assert.equal "2.0", response.jsonrpc
-      assert.equal 3, response.id
-      assert.is_table response.result
-      assert.is_table response.result.content
-      assert.equal "text", response.result.content[1].type
-      assert.matches "Unknown tool", response.result.content[1].text
-      assert.is_true response.result.isError
-
-    it "should call list_routes tool successfully", ->
-      message = {
-        jsonrpc: "2.0"
-        id: 3
-        method: "tools/call"
-        params: {
-          name: "list_routes"
-          arguments: {}
-        }
-      }
-
-      response = server\handle_tools_call(message)
-
-      assert.equal "2.0", response.jsonrpc
-      assert.equal 3, response.id
-      assert.is_table response.result
-      assert.is_table response.result.content
-      assert.equal "text", response.result.content[1].type
-      assert.is_false response.result.isError
-
-      -- Parse the JSON response
-      json = require "cjson.safe"
-      routes_data = json.decode(response.result.content[1].text)
-      assert.is_table routes_data
-      -- Assuming the response should contain the routes; adjust as needed
-      -- to match the actual expected number of routes
-      assert.is_number #routes_data
-
-    it "should handle schema tool with missing parameter", ->
-      message = {
-        jsonrpc: "2.0"
-        id: 4
-        method: "tools/call"
-        params: {
-          name: "schema"
-          arguments: {}
-        }
-      }
-
-      response = server\handle_tools_call(message)
-
-      assert.equal "2.0", response.jsonrpc
-      assert.equal 4, response.id
-      assert.is_table response.result
-      assert.is_table response.result.content
-      assert.equal "text", response.result.content[1].type
-      assert.matches "Missing required parameter", response.result.content[1].text
-      assert.is_true response.result.isError
-
-    it "should handle schema tool with parameter", ->
-      message = {
-        jsonrpc: "2.0"
-        id: 4
-        method: "tools/call"
-        params: {
-          name: "schema"
-          arguments: {
-            model_name: "User"
-          }
-        }
-      }
-
-      response = server\handle_tools_call(message)
-
-      assert.equal "2.0", response.jsonrpc
-      assert.equal 4, response.id
-      assert.is_table response.result
-      assert.is_table response.result.content
-      assert.equal "text", response.result.content[1].type
-      -- This should return an error since the model loading is not implemented
-      assert.is_true response.result.isError
-
   describe "handle_message", ->
+    local server
+
+    before_each ->
+      server = McpServer!
+
     it "should dispatch to correct handlers", ->
       -- Test initialize
       init_message = {
@@ -590,35 +431,578 @@ describe "LapisMcpServer", ->
       assert.same {}, response.result
 
     it "should handle unknown methods", ->
-      message = {
+      response = server\handle_message {
         jsonrpc: "2.0"
         id: 99
-        method: "unknown/method"
+        method: "unknown_method"
       }
 
-      response = server\handle_message(message)
+      assert.same {
+        jsonrpc: "2.0",
+        id: 99,
+        error: {
+          code: -32601,
+          message: "Method not found: unknown_method"
+        }
+      }, response
+
+  describe "handle_tools_list", ->
+    local server, mock_transport
+    before_each ->
+      class MyToolServer extends McpServer
+        @add_tool {
+          name: "test-tool"
+          inputSchema: { type: "object", properties: {}, required: {} }
+        }, -> "hello world"
+
+        @add_tool {
+          name: "bogus-tool"
+          inputSchema: { type: "object", properties: { exampleProperty: { type: "string" } }, required: { "exampleProperty" } }
+        }, -> "I am BOGUS"
+
+      server = MyToolServer!
+      mock_transport = with_mock_transport server
+
+    it "should require initialization", ->
+      response = server\handle_tools_list {
+        jsonrpc: "2.0"
+        id: 2
+        method: "tools/list"
+      }
+
+      assert.same {
+        jsonrpc: "2.0",
+        id: 2,
+        error: {
+          code: -32002,
+          message: "Server not initialized. Call initialize first."
+        }
+      }, response
+
+    it "should list tools", ->
+      server\skip_initialize!
+
+      response = server\handle_tools_list {
+        jsonrpc: "2.0"
+        id: 2
+        method: "tools/list"
+      }
 
       assert.equal "2.0", response.jsonrpc
-      assert.equal 99, response.id
-      assert.is_table response.error
-      assert.equal -32601, response.error.code
-      assert.matches "Method not found", response.error.message
+      assert.equal 2, response.id
+      assert.is_table response.result
+      assert.is_table response.result.tools
+      assert.equal 2, #response.result.tools
 
-  describe "routes tool", ->
-    it "should extract routes from app via full tool call", ->
-      -- Initialize server first
-      init_message = {
+      -- Check tool names
+      tool_names = {}
+      for _, tool in ipairs(response.result.tools)
+        tool_names[tool.name] = true
+
+      assert.is_true tool_names["test-tool"]
+      assert.is_true tool_names["bogus-tool"]
+
+  describe "handle_tools_call", ->
+    local server
+    before_each ->
+      class MyToolServer extends McpServer
+        @add_tool {
+          name: "string-tool"
+          description: "Returns a simple string"
+          inputSchema: { type: "object", properties: {}, required: {} }
+        }, -> "simple string"
+
+        @add_tool {
+          name: "object-tool"
+          description: "Returns an object"
+          inputSchema: { type: "object", properties: {}, required: {} }
+        }, -> {"key": "value", "number": 42}
+
+        @add_tool {
+          name: "error-tool"
+          description: "Returns nil and an error"
+          inputSchema: { type: "object", properties: {}, required: {} }
+        }, -> nil, "explicit error"
+
+        @add_tool {
+          name: "required-params-tool"
+          description: "Requires certain parameters"
+          inputSchema: { type: "object", properties: { param1: { type: "string" } }, required: { "param1" } }
+        }, (params) => "Got #{params.param1}"
+
+      server = MyToolServer!
+      server\skip_initialize!
+
+    it "should require initialization", ->
+      uninit_server = McpServer!
+
+      response = uninit_server\handle_tools_call {
         jsonrpc: "2.0"
-        id: 1
-        method: "initialize"
+        id: 3
+        method: "tools/call"
         params: {
-          protocolVersion: "2025-06-18"
+          name: "routes"
+          arguments: {}
         }
       }
-      server\handle_initialize(init_message)
 
-      -- Call list_routes tool through the full MCP flow
+      assert.same {
+        jsonrpc: "2.0",
+        id: 3,
+        error: {
+          code: -32002,
+          message: "Server not initialized. Call initialize first."
+        }
+      }, response
+
+    it "should handle unknown tool", ->
+      response = server\handle_tools_call {
+        jsonrpc: "2.0"
+        id: 3
+        method: "tools/call"
+        params: {
+          name: "unknown_tool"
+          arguments: {}
+        }
+      }
+
+      assert.same {
+        jsonrpc: "2.0",
+        id: 3,
+        result: {
+          content: {
+            {
+              type: "text",
+              text: "Unknown tool: unknown_tool"
+            }
+          },
+          isError: true
+        }
+      }, response
+
+    it "should handle returning a simple string", ->
+      message = {
+        jsonrpc: "2.0"
+        id: 5
+        method: "tools/call"
+        params: {
+          name: "string-tool"
+          arguments: {}
+        }
+      }
+
+      response = server\handle_tools_call(message)
+
+      assert.same {
+        jsonrpc: "2.0",
+        id: 5,
+        result: {
+          content: {
+            {
+              type: "text",
+              text: "simple string"
+            }
+          },
+          isError: false
+        }
+      }, response
+
+    it "should handle returning an object", ->
+      response = server\handle_tools_call {
+        jsonrpc: "2.0"
+        id: 6
+        method: "tools/call"
+        params: {
+          name: "object-tool"
+          arguments: {}
+        }
+      }
+
+      assert.equal "2.0", response.jsonrpc
+      assert.equal 6, response.id
+      assert.is_table response.result
+      assert.is_table response.result.content
+      assert.equal "text", response.result.content[1].type
+
+      -- Decode the JSON text to verify structure
+      decoded_result = json.decode response.result.content[1].text
+      assert.same {
+        key: "value"
+        number: 42
+      }, decoded_result
+
+      assert.is_false response.result.isError
+
+    it "should handle tool returning nil and an error", ->
+      message = {
+        jsonrpc: "2.0"
+        id: 7
+        method: "tools/call"
+        params: {
+          name: "error-tool"
+          arguments: {}
+        }
+      }
+
+      response = server\handle_tools_call(message)
+
+      assert.same {
+        jsonrpc: "2.0",
+        id: 7,
+        result: {
+          content: {
+            {
+              type: "text",
+              text: "Error executing tool: explicit error"
+            }
+          },
+          isError: true
+        }
+      }, response
+
+    it "should handle tool with missing parameter", ->
+      response = server\handle_tools_call {
+        jsonrpc: "2.0"
+        id: 4
+        method: "tools/call"
+        params: {
+          name: "required-params-tool"
+          arguments: {}
+        }
+      }
+
+      assert.same {
+        jsonrpc: "2.0",
+        id: 4,
+        result: {
+          content: {
+            {
+              type: "text",
+              text: "Missing required parameter: param1"
+            }
+          },
+          isError: true
+        }
+      }, response
+
+    it "should handle tool with parameter", ->
+      response = server\handle_tools_call {
+        jsonrpc: "2.0"
+        id: 4
+        method: "tools/call"
+        params: {
+          name: "required-params-tool"
+          arguments: {
+            param1: "TestValue"
+          }
+        }
+      }
+
+      assert.same {
+        jsonrpc: "2.0",
+        id: 4,
+        result: {
+          content: {
+            {
+              type: "text",
+              text: "Got TestValue"
+            }
+          },
+          isError: false
+        }
+      }, response
+
+  describe "hidden tools", ->
+    local server
+    before_each ->
+      class HiddenToolServer extends McpServer
+        @add_tool {
+          name: "visible-tool"
+          description: "A visible tool"
+          inputSchema: { type: "object", properties: {}, required: {} }
+          annotations: { title: "Visible Tool" }
+        }, -> "visible result"
+
+        @add_tool {
+          name: "hidden-tool"
+          description: "A hidden tool"
+          inputSchema: { type: "object", properties: {}, required: {} }
+          annotations: { title: "Hidden Tool" }
+          hidden: true
+        }, -> "hidden result"
+
+      server = HiddenToolServer!
+      server\skip_initialize!
+
+    it "should create tools with hidden property", ->
+      visible_tool = server\find_tool("visible-tool")
+      assert.is_not_nil visible_tool
+      assert.is_false visible_tool.hidden
+
+      -- hidden tool can still be found directly by name
+      hidden_tool = server\find_tool("hidden-tool")
+      assert.is_not_nil hidden_tool
+      assert.is_true hidden_tool.hidden
+
+    it "should exclude hidden tools from tools list by default", ->
+      response = server\handle_tools_list {
+        jsonrpc: "2.0"
+        id: 2
+        method: "tools/list"
+      }
+
+      assert.equal 1, #response.result.tools
+      assert.equal "visible-tool", response.result.tools[1].name
+
+    it "should still allow calling hidden tools directly", ->
+      -- Call hidden tool directly
       call_message = {
+        jsonrpc: "2.0"
+        id: 2
+        method: "tools/call"
+        params: {
+          name: "hidden-tool"
+          arguments: {}
+        }
+      }
+
+      response = server\handle_tools_call(call_message)
+
+      assert.same {
+        jsonrpc: "2.0",
+        id: 2,
+        result: {
+          content: {
+            {
+              type: "text",
+              text: "hidden result"
+            }
+          },
+          isError: false
+        }
+      }, response
+
+  describe "tool visibility management", ->
+    local server, mock_transport
+
+    before_each ->
+      class TestServer extends McpServer
+        @add_tool {
+          name: "tool-1"
+          description: "First tool"
+          inputSchema: { type: "object", properties: {}, required: {} }
+          annotations: { title: "Tool 1" }
+        }, -> "result 1"
+
+        @add_tool {
+          name: "tool-2"
+          description: "Second tool"
+          inputSchema: { type: "object", properties: {}, required: {} }
+          annotations: { title: "Tool 2" }
+          hidden: true
+        }, -> "result 2"
+
+        @add_tool {
+          name: "tool-3"
+          description: "Third tool"
+          inputSchema: { type: "object", properties: {}, required: {} }
+          annotations: { title: "Tool 3" }
+        }, -> "result 3"
+
+      server = TestServer!
+      mock_transport = with_mock_transport server
+      server\skip_initialize!
+
+    it "should initialize with empty tool_visibility table", ->
+      assert.same {}, server.tool_visibility
+
+    it "should set single tool visibility", ->
+      -- Hide a visible tool
+      result = server\set_tool_visibility("tool-1", false)
+      assert.is_true result
+      assert.is_false server.tool_visibility["tool-1"]
+
+      -- Show a hidden tool
+      result = server\set_tool_visibility("tool-2", true)
+      assert.is_true result
+      assert.is_true server.tool_visibility["tool-2"]
+
+    it "should set multiple tool visibility with table", ->
+      visibility_map = {
+        "tool-1": false
+        "tool-2": true
+        "tool-3": false
+      }
+
+      result = server\set_tool_visibility(visibility_map)
+      assert.is_true result
+
+      assert.is_false server.tool_visibility["tool-1"]
+      assert.is_true server.tool_visibility["tool-2"]
+      assert.is_false server.tool_visibility["tool-3"]
+
+    it "should return false when no visibility changes", ->
+      -- Set a tool to its current visibility
+      server\set_tool_visibility("tool-1", true)  -- tool-1 is already visible
+      result = server\set_tool_visibility("tool-1", true)
+      assert.is_nil result
+
+      server\set_tool_visibility("tool-2", false)  -- tool-2 is already hidden
+      result = server\set_tool_visibility("tool-2", false)
+      assert.is_nil result
+
+    it "should use hide_tool and unhide_tool shortcuts", ->
+      -- Hide a tool
+      result = server\hide_tool("tool-1")
+      assert.is_true result
+      assert.is_false server.tool_visibility["tool-1"]
+
+      -- Unhide a tool
+      result = server\unhide_tool("tool-2")
+      assert.is_true result
+      assert.is_true server.tool_visibility["tool-2"]
+
+    it "should respect visibility overrides in tools list", ->
+      -- Hide tool-1 and show tool-2
+      server\set_tool_visibility("tool-1", false)
+      server\set_tool_visibility("tool-2", true)
+
+      list_message = {
+        jsonrpc: "2.0"
+        id: 2
+        method: "tools/list"
+      }
+
+      response = server\handle_tools_list(list_message)
+
+      -- Should have tool-2 and tool-3 (tool-1 is hidden, tool-2 is shown)
+      assert.equal 2, #response.result.tools
+
+      tool_names = {}
+      for tool in *response.result.tools
+        tool_names[tool.name] = true
+
+      assert.is_true tool_names["tool-2"]
+      assert.is_true tool_names["tool-3"]
+      assert.is_nil tool_names["tool-1"]
+
+  describe "tools list changed notifications", ->
+    local test_server, mock_transport
+
+    before_each ->
+      class TestServer extends McpServer
+        @add_tool {
+          name: "test-tool"
+          description: "Test tool"
+          inputSchema: { type: "object", properties: {}, required: {} }
+          annotations: { title: "Test Tool" }
+        }, -> "test result"
+
+      test_server = TestServer!
+      mock_transport = with_mock_transport test_server
+      test_server\skip_initialize!
+
+    it "should send notification when tool visibility changes", ->
+      initial_count = #mock_transport.messages
+
+      test_server\set_tool_visibility("test-tool", false)
+
+      assert.equal initial_count + 1, #mock_transport.messages
+      notification = mock_transport.messages[#mock_transport.messages]
+
+      assert.same {
+        jsonrpc: "2.0",
+        method: "notifications/tools/list_changed",
+      }, notification
+
+    it "should not send notification when no visibility changes", ->
+      initial_count = #mock_transport.messages
+
+      test_server.tool_visibility["test-tool"] = true
+
+      -- Set tool to its current visibility (should not change)
+      test_server\set_tool_visibility("test-tool", true)
+
+      assert.equal initial_count, #mock_transport.messages
+
+    it "should not send notification before client initialization", ->
+      -- Create uninitialized server
+      class UninitServer extends McpServer
+        @add_tool {
+          name: "test-tool"
+          description: "Test tool"
+          inputSchema: { type: "object", properties: {}, required: {} }
+          annotations: { title: "Test Tool" }
+        }, -> "test result"
+
+      uninit_server = UninitServer!
+      mock_transport = with_mock_transport uninit_server
+
+      initial_count = #mock_transport.messages
+
+      uninit_server\set_tool_visibility("test-tool", false)
+
+      assert.equal initial_count, #mock_transport.messages
+
+    it "should send notification for batch visibility changes", ->
+      initial_count = #mock_transport.messages
+
+      visibility_map = {
+        "test-tool": false
+        "nonexistent-tool": true
+      }
+
+      test_server\set_tool_visibility(visibility_map)
+
+      assert.equal initial_count + 1, #mock_transport.messages
+
+describe "LapisMcpServer", ->
+  LapisMcpServer = require "lapis.mcp.lapis_server"
+
+  local mock_app, server
+
+  before_each ->
+    mock_app = ->
+      router: {
+        named_routes: {
+          root: { "/", "GET" }
+          users: { "/users", "GET" }
+          user: { "/users/:id", "GET" }
+        }
+        build: ->
+      }
+    server = LapisMcpServer {
+      app: mock_app
+    }
+
+  it "get_all_tools", ->
+    tools = server\get_all_tools!
+
+    assert.is_not_nil tools.list_routes
+    assert.is_not_nil tools.list_models
+    assert.is_not_nil tools.schema
+
+    -- Check list_routes tool structure
+    list_routes_tool = tools.list_routes
+
+    assert.equal "list_routes", list_routes_tool.name
+    assert.equal "List Routes", list_routes_tool.annotations.title
+    assert.is_string list_routes_tool.description
+    assert.is_table list_routes_tool.inputSchema
+
+  it "find_tool", ->
+    tool = server\find_tool("list_routes")
+    assert.is_not_nil tool
+    assert.equal "list_routes", tool.name
+    assert.equal "List Routes", tool.annotations.title
+
+  describe "routes tool", ->
+    before_each ->
+      server\skip_initialize!
+
+    it "should extract routes from app via full tool call", ->
+      -- Call list_routes tool through the full MCP flow
+      response = server\handle_tools_call {
         jsonrpc: "2.0"
         id: 2
         method: "tools/call"
@@ -628,8 +1012,6 @@ describe "LapisMcpServer", ->
         }
       }
 
-      response = server\handle_tools_call(call_message)
-
       assert.equal "2.0", response.jsonrpc
       assert.equal 2, response.id
       assert.is_table response.result
@@ -638,7 +1020,6 @@ describe "LapisMcpServer", ->
       assert.equal "text", response.result.content[1].type
 
       -- Parse the JSON response to check the actual routes
-      json = require "cjson.safe"
       routes = json.decode(response.result.content[1].text)
 
       assert.is_table routes
@@ -654,39 +1035,3 @@ describe "LapisMcpServer", ->
       assert.equal "/", routes[1][2][1]
       assert.equal "GET", routes[1][2][2]
 
-  describe "transport integration", ->
-    it "should handle JSON messages through transport", ->
-      -- Mock transport for testing
-      mock_transport = {
-        messages: {}
-        read_json_chunk: =>
-          if #@messages > 0
-            table.remove(@messages, 1)
-          else
-            false
-        write_json_chunk: (obj) =>
-          table.insert(@messages, obj)
-      }
-
-      server.transport = mock_transport
-
-      -- Test reading/writing JSON
-      test_message = {
-        jsonrpc: "2.0"
-        id: 1
-        method: "initialize"
-        params: {
-          protocolVersion: "2025-06-18"
-        }
-      }
-
-      mock_transport.messages = {test_message}
-
-      message = server\read_json_chunk!
-      assert.same test_message, message
-
-      response = server\handle_message(message)
-      server\write_json_chunk(response)
-
-      assert.equal 1, #mock_transport.messages
-      assert.equal "2.0", mock_transport.messages[1].jsonrpc
