@@ -335,7 +335,11 @@ class McpServer
         content: {
           {
             type: "text"
-            text: json.encode(result_or_error)
+            text: switch type result_or_error
+              when "string"
+                result_or_error
+              else
+                json.encode(result_or_error) or result_or_error
           }
         }
         isError: false
