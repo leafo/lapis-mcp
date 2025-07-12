@@ -31,6 +31,13 @@ The server automatically discovers routes from your application's router and mod
 
 This project provides a reusable `McpServer` base class that you can extend to create your own MCP servers. Here's how to implement your own:
 
+### Key Features
+
+- **Inheritance-based tool registration** - Tools are inherited from parent classes, with the ability for subclasses to override tools by name
+- **Error handling** - Both exceptions and explicit error returns are handled
+- **Debug logging** - Optional debug output with colored console logging
+- **MCP protocol compliance** - Follows the MCP 2025-06-18 specification
+
 ### Full Example: File System MCP Server
 
 #### Lua
@@ -297,7 +304,11 @@ end)
 
 ### Running Your Server
 
-#### Lua
+You can run your MCP server in two ways: directly using `run_stdio()` or with a CLI interface using the `run_cli` class method.
+
+#### Direct Execution
+
+##### Lua
 
 ```lua
 -- Create and run your server
@@ -305,7 +316,7 @@ local server = MyMcpServer({debug = true})
 server:run_stdio()
 ```
 
-#### MoonScript
+##### MoonScript
 
 ```moonscript
 -- Create and run your server
@@ -313,12 +324,61 @@ server = MyMcpServer({debug: true})
 server\run_stdio()
 ```
 
-### Key Features
+#### CLI Interface with `run_cli`
 
-- **Inheritance-based tool registration** - Tools are inherited from parent classes, with the ability for subclasses to override tools by name
-- **Error handling** - Both exceptions and explicit error returns are handled
-- **Debug logging** - Optional debug output with colored console logging
-- **MCP protocol compliance** - Follows the MCP 2025-06-18 specification
+The `run_cli` class method provides a command-line interface with argument parsing for your MCP server:
+
+##### Lua
+
+```lua
+-- Run your server with CLI interface
+MyMcpServer:run_cli({
+  name = "my-custom-server"  -- Optional: override the CLI program name
+})
+```
+
+##### MoonScript
+
+```moonscript
+-- Run your server with CLI interface
+MyMcpServer\run_cli {
+  name: "my-custom-server"  -- Optional: override the CLI program name
+}
+```
+
+#### CLI Options
+
+The `run_cli` method provides several useful command-line options:
+
+
+- `--help` - Show all CLI options
+- `--debug` - Enable debug logging to stderr
+- `--skip-initialize` / `--skip-init` - Skip the initialize stage and listen for messages immediately
+- `--tool <tool_name>` - Immediately invoke a specific tool, print output and exit
+- `--tool-argument <json>` / `--arg <json>` - Pass arguments to the tool (in JSON format)
+- `--send-message <message>` - Send a raw message and exit
+
+#### Examples
+
+```bash
+# Run server normally
+./my_server.lua
+
+# Run with debug logging
+./my_server.lua --debug
+
+# Test a specific tool
+./my_server.lua --tool list_files --arg '{"path": "/tmp"}'
+
+# Send a raw MCP message
+./my_server.lua --send-message tools/list
+
+# Send the initialize message
+./my_server.lua --send-message initialize
+
+# Send a custom JSON message
+./my_server.lua --send-message '{"jsonrpc":"2.0","id":"test","method":"tools/call","params":{"name":"hello","arguments":{"name":"World"}}}'
+```
 
 ## License
 
