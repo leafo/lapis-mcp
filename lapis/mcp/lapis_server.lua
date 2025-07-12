@@ -9,11 +9,11 @@ do
   _base_0.__index = _base_0
   setmetatable(_base_0, _parent_0.__base)
   _class_0 = setmetatable({
-    __init = function(self, app, options)
+    __init = function(self, options)
       if options == nil then
         options = { }
       end
-      self.app = app
+      self.app = options.app
       return _class_0.__parent.__init(self, options)
     end,
     __base = _base_0,
@@ -135,7 +135,5 @@ do
     _parent_0.__inherited(_parent_0, _class_0)
   end
   LapisMcpServer = _class_0
+  return _class_0
 end
-return {
-  LapisMcpServer = LapisMcpServer
-}

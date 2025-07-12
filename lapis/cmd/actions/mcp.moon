@@ -1,4 +1,3 @@
-import LapisMcpServer from require "lapis.mcp.lapis_server"
 json = require "cjson.safe"
 
 CLIENT_NAME = "lapis-mcp-cli"
@@ -25,6 +24,8 @@ find_lapis_application = (config) ->
 {
   argparser: ->
     with require("argparse") "lapis mcp", "Run an MCP server over stdin/out that can communicate with details of Lapis app"
+      \argument "server_module", "Name of the MCP server module to load", "lapis.mcp.lapis_server"
+
       \option "--send-message", "Send a raw message by name and exit (e.g. tools/list, initialize or a JSON object)"
       \option "--tool", "Immediately invoke a tool, print output and exit"
       \option "--tool-argument --arg", "Argument object to pass for tool call (in JSON format)"
@@ -33,9 +34,13 @@ find_lapis_application = (config) ->
 
   (args, lapis_args) =>
     config = @get_config lapis_args.environment
-    app = find_lapis_application(config)
 
-    server = LapisMcpServer(app, {debug: args.debug})
+    ServerClass = require args.server_module
+
+    server = ServerClass {
+      debug: args.debug
+      app: find_lapis_application(config)
+    }
 
     -- Handle --tool immediate invocation
     if args.tool

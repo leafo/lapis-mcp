@@ -1,5 +1,3 @@
-local LapisMcpServer
-LapisMcpServer = require("lapis.mcp.lapis_server").LapisMcpServer
 local json = require("cjson.safe")
 local CLIENT_NAME = "lapis-mcp-cli"
 local find_lapis_application
@@ -23,6 +21,7 @@ return {
   argparser = function()
     do
       local _with_0 = require("argparse")("lapis mcp", "Run an MCP server over stdin/out that can communicate with details of Lapis app")
+      _with_0:argument("server_module", "Name of the MCP server module to load", "lapis.mcp.lapis_server")
       _with_0:option("--send-message", "Send a raw message by name and exit (e.g. tools/list, initialize or a JSON object)")
       _with_0:option("--tool", "Immediately invoke a tool, print output and exit")
       _with_0:option("--tool-argument --arg", "Argument object to pass for tool call (in JSON format)")
@@ -33,9 +32,10 @@ return {
   end,
   function(self, args, lapis_args)
     local config = self:get_config(lapis_args.environment)
-    local app = find_lapis_application(config)
-    local server = LapisMcpServer(app, {
-      debug = args.debug
+    local ServerClass = require(args.server_module)
+    local server = ServerClass({
+      debug = args.debug,
+      app = find_lapis_application(config)
     })
     if args.tool then
       server:skip_initialize()

@@ -6,8 +6,9 @@ class LapisMcpServer extends McpServer
   @server_name: "lapis-mcp"
   @instructions: [[Tools to query information about the Lapis web application located in the current directory]]
 
-  new: (@app, options = {}) =>
-    super(options)
+  new: (options={}) =>
+    @app = options.app
+    super options
 
   -- Register the built-in Lapis tools
   @add_tool {
@@ -87,5 +88,3 @@ class LapisMcpServer extends McpServer
 
     model = db[model_name]
     error "not implemented yet"
-
-{:LapisMcpServer}
