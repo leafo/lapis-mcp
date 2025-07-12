@@ -296,7 +296,6 @@ class McpServer
       instructions: @@instructions
     }
 
-
   handle_tools_call: with_initialized (message) =>
     tool_name = message.params.name
     params = message.params.arguments or {}
@@ -376,8 +375,6 @@ class McpServer
       }
 
     @debug_log "success", "Tool executed successfully: #{tool_name}"
-
-
 
     return {
       jsonrpc: "2.0"

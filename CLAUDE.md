@@ -20,7 +20,18 @@ make local
 
 ## Project Architecture
 
-Lapis MCP is a Model Context Protocol (MCP) server for the Lapis web framework. It follows the MCP specification to provide tools that help examine and introspect Lapis applications.
+Lapis MCP is a Model Context Protocol (MCP) server for the Lapis web framework.
+It follows the MCP specification to provide tools that help examine and
+introspect Lapis applications.
+
+If you are making changes to the implementation of the MCP protocol, please
+download the respective specification document and review it before making any
+changes:
+
+* Basic Lifecycle: https://modelcontextprotocol.io/specification/2024-11-05/basic/lifecycle.md
+* Tools: https://modelcontextprotocol.io/specification/2024-11-05/server/tools.md
+* Resources: https://modelcontextprotocol.io/specification/2024-11-05/server/resources.md
+* Prompts: https://modelcontextprotocol.io/specification/2024-11-05/server/prompts.md
 
 ### Core Components
 
