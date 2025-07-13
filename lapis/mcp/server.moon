@@ -466,8 +466,10 @@ class McpServer
     while current_class
       if resources = rawget(current_class, "resources")
         for resource in *resources
-          unless all_resources[resource.uri]  -- Don't override resources from parent classes
-            all_resources[resource.uri] = resource
+          key = resource.uri or resource.uriTemplate
+
+          unless all_resources[key]  -- Don't override resources from parent classes
+            all_resources[key] = resource
 
       current_class = current_class.__parent
     all_resources
@@ -511,13 +513,14 @@ class McpServer
       continue unless is_visible
       {
         uri: resource.uri
+        uriTemplate: resource.uriTemplate
         name: resource.name
         description: resource.description
         mimeType: resource.mimeType
         annotations: resource.annotations
       }
 
-    table.sort resources_list, (a, b) -> a.uri < b.uri
+    table.sort resources_list, (a, b) -> (a.uri or a.uriTemplate) < (b.uri or b.uriTemplate)
 
     {
       jsonrpc: "2.0"

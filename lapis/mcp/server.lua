@@ -456,8 +456,9 @@ do
           if resources then
             for _index_0 = 1, #resources do
               local resource = resources[_index_0]
-              if not (all_resources[resource.uri]) then
-                all_resources[resource.uri] = resource
+              local key = resource.uri or resource.uriTemplate
+              if not (all_resources[key]) then
+                all_resources[key] = resource
               end
             end
           end
@@ -531,6 +532,7 @@ do
             end
             local _value_0 = {
               uri = resource.uri,
+              uriTemplate = resource.uriTemplate,
               name = resource.name,
               description = resource.description,
               mimeType = resource.mimeType,
@@ -547,7 +549,7 @@ do
         resources_list = _accum_0
       end
       table.sort(resources_list, function(a, b)
-        return a.uri < b.uri
+        return (a.uri or a.uriTemplate) < (b.uri or b.uriTemplate)
       end)
       return {
         jsonrpc = "2.0",

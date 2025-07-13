@@ -22,9 +22,10 @@ return {
     do
       local _with_0 = require("argparse")("lapis mcp", "Run an MCP server over stdin/out that can communicate with details of Lapis app")
       _with_0:argument("server_module", "Name of the MCP server module to load", "lapis.mcp.lapis_server")
-      _with_0:option("--send-message", "Send a raw message by name and exit (e.g. tools/list, initialize or a JSON object)")
+      _with_0:option("--send-message", "Send a raw message by name and exit (e.g. tools/list, resources/list, initialize or a JSON object)")
       _with_0:option("--tool", "Immediately invoke a tool, print output and exit")
       _with_0:option("--tool-argument --arg", "Argument object to pass for tool call (in JSON format)")
+      _with_0:option("--resource", "Immediately fetch a resource by URI, print output and exit")
       _with_0:flag("--debug", "Enable debug logging to stderr")
       _with_0:flag("--skip-initialize --skip-init", "Skip the initialize stage and listen for messages immediately")
       return _with_0
@@ -61,6 +62,25 @@ return {
       end
       return 
     end
+    if args.resource then
+      server:skip_initialize()
+      local resource_uri = args.resource
+      local message = {
+        jsonrpc = "2.0",
+        id = "cmd-line-" .. tostring(os.time()),
+        method = "resources/read",
+        params = {
+          uri = resource_uri
+        }
+      }
+      local response = server:send_message(message)
+      if response.result and response.result.contents then
+        print(json.encode(response.result.contents))
+      else
+        print(json.encode(response))
+      end
+      return 
+    end
     if args.send_message then
       local message
       local _exp_0 = args.send_message
@@ -70,6 +90,13 @@ return {
           jsonrpc = "2.0",
           id = "cmd-line-" .. tostring(os.time()),
           method = "tools/list"
+        }
+      elseif "resources/list" == _exp_0 then
+        server:skip_initialize()
+        message = {
+          jsonrpc = "2.0",
+          id = "cmd-line-" .. tostring(os.time()),
+          method = "resources/list"
         }
       elseif "initialize" == _exp_0 then
         message = {
@@ -93,7 +120,7 @@ return {
       print(json.encode(response))
       return 
     end
-    if args.skip_initialize or args.tool then
+    if args.skip_initialize or args.tool or args.resource then
       server:skip_initialize()
     end
     return server:run_stdio()

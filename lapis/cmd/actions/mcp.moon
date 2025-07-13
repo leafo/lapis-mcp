@@ -26,9 +26,10 @@ find_lapis_application = (config) ->
     with require("argparse") "lapis mcp", "Run an MCP server over stdin/out that can communicate with details of Lapis app"
       \argument "server_module", "Name of the MCP server module to load", "lapis.mcp.lapis_server"
 
-      \option "--send-message", "Send a raw message by name and exit (e.g. tools/list, initialize or a JSON object)"
+      \option "--send-message", "Send a raw message by name and exit (e.g. tools/list, resources/list, initialize or a JSON object)"
       \option "--tool", "Immediately invoke a tool, print output and exit"
       \option "--tool-argument --arg", "Argument object to pass for tool call (in JSON format)"
+      \option "--resource", "Immediately fetch a resource by URI, print output and exit"
       \flag "--debug", "Enable debug logging to stderr"
       \flag "--skip-initialize --skip-init", "Skip the initialize stage and listen for messages immediately"
 
@@ -71,6 +72,31 @@ find_lapis_application = (config) ->
         print json.encode(response)
       return
 
+    -- Handle --resource immediate invocation
+    if args.resource
+      server\skip_initialize!
+      resource_uri = args.resource
+
+      -- Create a resource read message
+      message = {
+        jsonrpc: "2.0"
+        id: "cmd-line-#{os.time!}"
+        method: "resources/read"
+        params: {
+          uri: resource_uri
+        }
+      }
+
+      -- Send message and get response
+      response = server\send_message(message)
+
+      -- Output just the resource contents, not the full response
+      if response.result and response.result.contents
+        print json.encode(response.result.contents)
+      else
+        print json.encode(response)
+      return
+
     -- Handle --send-message argument
     if args.send_message
       message = switch args.send_message
@@ -80,6 +106,13 @@ find_lapis_application = (config) ->
             jsonrpc: "2.0"
             id: "cmd-line-#{os.time!}"
             method: "tools/list"
+          }
+        when "resources/list"
+          server\skip_initialize!
+          {
+            jsonrpc: "2.0"
+            id: "cmd-line-#{os.time!}"
+            method: "resources/list"
           }
         when "initialize"
           -- Handle initialize message specially
@@ -107,7 +140,7 @@ find_lapis_application = (config) ->
       return
 
     -- Skip initialization when using immediate invocation flags or when explicitly requested
-    if args.skip_initialize or args.tool
+    if args.skip_initialize or args.tool or args.resource
       server\skip_initialize!
 
     -- Run server normally

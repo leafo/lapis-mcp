@@ -8,9 +8,10 @@ run_cli = function(ServerClass, config)
   local argparse = require("argparse")
   local name = config.name or ServerClass.server_name or ServerClass.__name or "mcp-server"
   local parser = argparse(name, "Start an MCP server over stdin/stdout")
-  parser:option("--send-message", "Send a raw message by name and exit (e.g. tools/list, initialize or a JSON object)")
+  parser:option("--send-message", "Send a raw message by name and exit (e.g. tools/list, resources/list, initialize or a JSON object)")
   parser:option("--tool", "Immediately invoke a tool, print output and exit")
-  parser:option("--tool-argument --arg", "Argument object to pass for tool cool (in JSON format)")
+  parser:option("--tool-argument --arg", "Argument object to pass for tool call (in JSON format)")
+  parser:option("--resource", "Immediately fetch a resource by URI, print output and exit")
   parser:flag("--debug", "Enable debug logging to stderr")
   parser:flag("--skip-initialize --skip-init", "Skip the initialize stage and listen for messages immediately")
   local args = parser:parse((function()
@@ -49,6 +50,25 @@ run_cli = function(ServerClass, config)
     end
     return 
   end
+  if args.resource then
+    server:skip_initialize()
+    local resource_uri = args.resource
+    local message = {
+      jsonrpc = "2.0",
+      id = "cmd-line-" .. tostring(os.time()),
+      method = "resources/read",
+      params = {
+        uri = resource_uri
+      }
+    }
+    local response = server:send_message(message)
+    if response.result and response.result.contents then
+      print(json.encode(response.result.contents))
+    else
+      print(json.encode(response))
+    end
+    return 
+  end
   if args.send_message then
     local message
     local _exp_0 = args.send_message
@@ -58,6 +78,13 @@ run_cli = function(ServerClass, config)
         jsonrpc = "2.0",
         id = "cmd-line-" .. tostring(os.time()),
         method = "tools/list"
+      }
+    elseif "resources/list" == _exp_0 then
+      server:skip_initialize()
+      message = {
+        jsonrpc = "2.0",
+        id = "cmd-line-" .. tostring(os.time()),
+        method = "resources/list"
       }
     elseif "initialize" == _exp_0 then
       message = {
@@ -81,7 +108,7 @@ run_cli = function(ServerClass, config)
     print(json.encode(response))
     return 
   end
-  if args.skip_initialize or args.tool then
+  if args.skip_initialize or args.tool or args.resource then
     server:skip_initialize()
   end
   return server:run_stdio()
