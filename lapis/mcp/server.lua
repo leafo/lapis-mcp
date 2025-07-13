@@ -134,12 +134,21 @@ do
       if not (self.initialized) then
         return 
       end
-      local notification = {
+      self:write_json_chunk({
         jsonrpc = "2.0",
         method = "notifications/tools/list_changed"
-      }
-      self:write_json_chunk(notification)
+      })
       return self:debug_log("info", "Sent tools/list_changed notification")
+    end,
+    notify_resources_list_changed = function(self)
+      if not (self.initialized) then
+        return 
+      end
+      self:write_json_chunk({
+        jsonrpc = "2.0",
+        method = "notifications/resources/list_changed"
+      })
+      return self:debug_log("info", "Sent resources/list_changed notification")
     end,
     set_tool_visibility = function(self, tool_name, visible)
       local changed_count = 0
@@ -215,6 +224,22 @@ do
       end
       return nil
     end,
+    find_resource = function(self, uri)
+      local current_class = self.__class
+      while current_class do
+        local resources = rawget(current_class, "resources")
+        if resources then
+          for _index_0 = 1, #resources do
+            local resource = resources[_index_0]
+            if resource.uri == uri then
+              return resource
+            end
+          end
+        end
+        current_class = current_class.__parent
+      end
+      return nil
+    end,
     read_json_chunk = function(self)
       return self.transport:read_json_chunk()
     end,
@@ -236,6 +261,11 @@ do
         return self:handle_tools_list(message)
       elseif "tools/call" == _exp_0 then
         return self:handle_tools_call(message)
+      elseif "resources/list" == _exp_0 then
+        self:debug_log("info", "Listing available resources")
+        return self:handle_resources_list(message)
+      elseif "resources/read" == _exp_0 then
+        return self:handle_resources_read(message)
       elseif "ping" == _exp_0 then
         return self:handle_ping(message)
       else
@@ -283,6 +313,14 @@ do
       return self.__class.server_name or self.__class.__name
     end,
     server_specification = function(self)
+      local capabilities
+      do
+        local _tbl_0 = { }
+        for k, v in pairs(self.server_capabilities) do
+          _tbl_0[k] = v
+        end
+        capabilities = _tbl_0
+      end
       return {
         protocolVersion = self.protocol_version,
         capabilities = self.server_capabilities,
@@ -409,6 +447,25 @@ do
       end
       return all_tools
     end,
+    get_all_resources = function(self)
+      local all_resources = { }
+      local current_class = self.__class
+      while current_class do
+        do
+          local resources = rawget(current_class, "resources")
+          if resources then
+            for _index_0 = 1, #resources do
+              local resource = resources[_index_0]
+              if not (all_resources[resource.uri]) then
+                all_resources[resource.uri] = resource
+              end
+            end
+          end
+        end
+        current_class = current_class.__parent
+      end
+      return all_resources
+    end,
     handle_tools_list = with_initialized(function(self, message)
       local tools_list
       do
@@ -451,6 +508,117 @@ do
         id = message.id,
         result = {
           tools = tools_list
+        }
+      }
+    end),
+    handle_resources_list = with_initialized(function(self, message)
+      local resources_list
+      do
+        local _accum_0 = { }
+        local _len_0 = 1
+        for uri, resource in pairs(self:get_all_resources()) do
+          local _continue_0 = false
+          repeat
+            local is_visible
+            if self.tool_visibility[resource.uri] ~= nil then
+              is_visible = self.tool_visibility[resource.uri]
+            else
+              is_visible = not resource.hidden
+            end
+            if not (is_visible) then
+              _continue_0 = true
+              break
+            end
+            local _value_0 = {
+              uri = resource.uri,
+              name = resource.name,
+              description = resource.description,
+              mimeType = resource.mimeType,
+              annotations = resource.annotations
+            }
+            _accum_0[_len_0] = _value_0
+            _len_0 = _len_0 + 1
+            _continue_0 = true
+          until true
+          if not _continue_0 then
+            break
+          end
+        end
+        resources_list = _accum_0
+      end
+      table.sort(resources_list, function(a, b)
+        return a.uri < b.uri
+      end)
+      return {
+        jsonrpc = "2.0",
+        id = message.id,
+        result = {
+          resources = resources_list
+        }
+      }
+    end),
+    handle_resources_read = with_initialized(function(self, message)
+      local resource_uri = message.params.uri
+      self:debug_log("info", "Reading resource: " .. tostring(resource_uri))
+      local resource = self:find_resource(resource_uri)
+      if not (resource) then
+        return {
+          jsonrpc = "2.0",
+          id = message.id,
+          error = {
+            code = -32002,
+            message = "Resource not found: " .. tostring(resource_uri)
+          }
+        }
+      end
+      local ok, result_or_error, user_error = pcall(resource.handler, self, message.params)
+      if not ok then
+        self:debug_log("error", "Resource read failed: " .. tostring(result_or_error))
+        return {
+          jsonrpc = "2.0",
+          id = message.id,
+          error = {
+            code = -32603,
+            message = "Error reading resource: " .. tostring(result_or_error)
+          }
+        }
+      end
+      if result_or_error == nil then
+        self:debug_log("warning", "Resource returned error: " .. tostring(user_error or "Unknown error"))
+        return {
+          jsonrpc = "2.0",
+          id = message.id,
+          error = {
+            code = -32603,
+            message = "Error reading resource: " .. tostring(user_error or "Unknown error")
+          }
+        }
+      end
+      self:debug_log("success", "Resource read successfully: " .. tostring(resource_uri))
+      local contents
+      if type(result_or_error) == "table" and result_or_error.contents then
+        contents = result_or_error.contents
+      else
+        contents = {
+          {
+            uri = resource_uri,
+            mimeType = resource.mimeType or "text/plain",
+            text = (function()
+              local _exp_0 = type(result_or_error)
+              if "string" == _exp_0 then
+                return result_or_error
+              else
+                return json.encode(result_or_error) or tostring(result_or_error)
+              end
+            end)()
+          }
+        }
+      end
+      return {
+        jsonrpc = "2.0",
+        id = message.id,
+        result = {
+          contents = contents
         }
       }
     end),
@@ -519,6 +687,10 @@ do
       self.server_capabilities = {
         tools = {
           listChanged = true
+        },
+        resources = {
+          subscribe = false,
+          listChanged = true
         }
       }
       self.client_capabilities = { }
@@ -567,6 +739,22 @@ do
       hidden = details.hidden or false
     }
     return table.insert(rawget(self, "tools"), tool_def)
+  end
+  self.add_resource = function(self, details, read_fn)
+    if not (rawget(self, "resources")) then
+      rawset(self, "resources", { })
+    end
+    local resource_def = {
+      uri = details.uri,
+      uriTemplate = details.uriTemplate,
+      name = details.name,
+      description = details.description,
+      mimeType = details.mimeType,
+      annotations = details.annotations,
+      handler = read_fn,
+      hidden = details.hidden or false
+    }
+    return table.insert(rawget(self, "resources"), resource_def)
   end
   McpServer = _class_0
 end

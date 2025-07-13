@@ -299,6 +299,10 @@ describe "McpServer", ->
         tools: {
           listChanged: true
         }
+        resources: {
+          subscribe: false
+          listChanged: true
+        }
       }, response.result.capabilities
 
   describe "handle_initialize", ->
@@ -328,6 +332,10 @@ describe "McpServer", ->
           protocolVersion: "2025-06-18"
           capabilities: {
             tools: {
+              listChanged: true
+            }
+            resources: {
+              subscribe: false
               listChanged: true
             }
           }
@@ -1034,4 +1042,309 @@ describe "LapisMcpServer", ->
       assert.is_table routes[1][2]
       assert.equal "/", routes[1][2][1]
       assert.equal "GET", routes[1][2][2]
+
+  describe "resources", ->
+    describe "basic resource functionality", ->
+      it "should add and find resources", ->
+        class TestResourceServer extends McpServer
+          @add_resource {
+            uri: "test://example/resource1"
+            name: "Test Resource"
+            description: "A test resource"
+            mimeType: "text/plain"
+          }, -> "Resource content"
+
+        server = TestResourceServer!
+        resource = server\find_resource("test://example/resource1")
+        assert.is_not_nil resource
+        assert.equal "test://example/resource1", resource.uri
+        assert.equal "Test Resource", resource.name
+        assert.equal "A test resource", resource.description
+        assert.equal "text/plain", resource.mimeType
+
+      it "should handle resource inheritance", ->
+        class BaseResourceServer extends McpServer
+          @add_resource {
+            uri: "test://base/resource"
+            name: "Base Resource"
+            description: "Resource from base class"
+            mimeType: "text/plain"
+          }, -> "Base content"
+
+        class DerivedResourceServer extends BaseResourceServer
+          @add_resource {
+            uri: "test://derived/resource"
+            name: "Derived Resource"
+            description: "Resource from derived class"
+            mimeType: "text/plain"
+          }, -> "Derived content"
+
+        server = DerivedResourceServer!
+
+        -- Should find both base and derived resources
+        base_resource = server\find_resource("test://base/resource")
+        assert.is_not_nil base_resource
+        assert.equal "Base Resource", base_resource.name
+
+        derived_resource = server\find_resource("test://derived/resource")
+        assert.is_not_nil derived_resource
+        assert.equal "Derived Resource", derived_resource.name
+
+    describe "handle_resources_list", ->
+      local server
+      before_each ->
+        class TestResourceServer extends McpServer
+          @add_resource {
+            uri: "test://example/visible"
+            name: "Visible Resource"
+            description: "A visible resource"
+            mimeType: "text/plain"
+          }, -> "Visible content"
+
+          @add_resource {
+            uri: "test://example/hidden"
+            name: "Hidden Resource"
+            description: "A hidden resource"
+            mimeType: "application/json"
+            hidden: true
+          }, -> "Hidden content"
+
+        server = TestResourceServer!
+
+      it "should require initialization", ->
+        response = server\handle_resources_list {
+          jsonrpc: "2.0"
+          id: 1
+          method: "resources/list"
+        }
+
+        assert.same {
+          jsonrpc: "2.0"
+          id: 1
+          error: {
+            code: -32002
+            message: "Server not initialized. Call initialize first."
+          }
+        }, response
+
+      it "should list visible resources", ->
+        server\skip_initialize!
+
+        response = server\handle_resources_list {
+          jsonrpc: "2.0"
+          id: 1
+          method: "resources/list"
+        }
+
+        assert.equal "2.0", response.jsonrpc
+        assert.equal 1, response.id
+        assert.is_table response.result
+        assert.is_table response.result.resources
+        assert.equal 1, #response.result.resources
+
+        resource = response.result.resources[1]
+        assert.equal "test://example/visible", resource.uri
+        assert.equal "Visible Resource", resource.name
+        assert.equal "A visible resource", resource.description
+        assert.equal "text/plain", resource.mimeType
+
+    describe "handle_resources_read", ->
+      local server
+      before_each ->
+        class TestResourceServer extends McpServer
+          @add_resource {
+            uri: "test://example/simple"
+            name: "Simple Resource"
+            description: "A simple text resource"
+            mimeType: "text/plain"
+          }, -> "Simple text content"
+
+          @add_resource {
+            uri: "test://example/object"
+            name: "Object Resource"
+            description: "A JSON object resource"
+            mimeType: "application/json"
+          }, -> {message: "Hello", value: 42}
+
+          @add_resource {
+            uri: "test://example/error"
+            name: "Error Resource"
+            description: "A resource that returns an error"
+            mimeType: "text/plain"
+          }, -> nil, "Resource error"
+
+          @add_resource {
+            uri: "test://example/structured"
+            name: "Structured Resource"
+            description: "A resource with structured response"
+            mimeType: "text/plain"
+          }, -> {
+            contents: {
+              {
+                uri: "test://example/structured"
+                mimeType: "text/plain"
+                text: "Structured content"
+              }
+            }
+          }
+
+        server = TestResourceServer!
+
+      it "should require initialization", ->
+        response = server\handle_resources_read {
+          jsonrpc: "2.0"
+          id: 1
+          method: "resources/read"
+          params: {
+            uri: "test://example/simple"
+          }
+        }
+
+        assert.same {
+          jsonrpc: "2.0"
+          id: 1
+          error: {
+            code: -32002
+            message: "Server not initialized. Call initialize first."
+          }
+        }, response
+
+      it "should read simple text resource", ->
+        server\skip_initialize!
+
+        response = server\handle_resources_read {
+          jsonrpc: "2.0"
+          id: 1
+          method: "resources/read"
+          params: {
+            uri: "test://example/simple"
+          }
+        }
+
+        assert.equal "2.0", response.jsonrpc
+        assert.equal 1, response.id
+        assert.is_table response.result
+        assert.is_table response.result.contents
+        assert.equal 1, #response.result.contents
+
+        content = response.result.contents[1]
+        assert.equal "test://example/simple", content.uri
+        assert.equal "text/plain", content.mimeType
+        assert.equal "Simple text content", content.text
+
+      it "should read object resource as JSON", ->
+        server\skip_initialize!
+
+        response = server\handle_resources_read {
+          jsonrpc: "2.0"
+          id: 1
+          method: "resources/read"
+          params: {
+            uri: "test://example/object"
+          }
+        }
+
+        assert.equal "2.0", response.jsonrpc
+        assert.equal 1, response.id
+        assert.is_table response.result
+        assert.is_table response.result.contents
+        assert.equal 1, #response.result.contents
+
+        content = response.result.contents[1]
+        assert.equal "test://example/object", content.uri
+        assert.equal "application/json", content.mimeType
+
+        -- Should be JSON encoded
+        decoded = json.decode(content.text)
+        assert.same {message: "Hello", value: 42}, decoded
+
+      it "should handle resource not found", ->
+        server\skip_initialize!
+
+        response = server\handle_resources_read {
+          jsonrpc: "2.0"
+          id: 1
+          method: "resources/read"
+          params: {
+            uri: "test://example/nonexistent"
+          }
+        }
+
+        assert.same {
+          jsonrpc: "2.0"
+          id: 1
+          error: {
+            code: -32002
+            message: "Resource not found: test://example/nonexistent"
+          }
+        }, response
+
+      it "should handle resource error", ->
+        server\skip_initialize!
+
+        response = server\handle_resources_read {
+          jsonrpc: "2.0"
+          id: 1
+          method: "resources/read"
+          params: {
+            uri: "test://example/error"
+          }
+        }
+
+        assert.same {
+          jsonrpc: "2.0"
+          id: 1
+          error: {
+            code: -32603
+            message: "Error reading resource: Resource error"
+          }
+        }, response
+
+      it "should handle structured response", ->
+        server\skip_initialize!
+
+        response = server\handle_resources_read {
+          jsonrpc: "2.0"
+          id: 1
+          method: "resources/read"
+          params: {
+            uri: "test://example/structured"
+          }
+        }
+
+        assert.equal "2.0", response.jsonrpc
+        assert.equal 1, response.id
+        assert.is_table response.result
+        assert.is_table response.result.contents
+        assert.equal 1, #response.result.contents
+
+        content = response.result.contents[1]
+        assert.equal "test://example/structured", content.uri
+        assert.equal "text/plain", content.mimeType
+        assert.equal "Structured content", content.text
+
+    describe "server capabilities", ->
+      it "should include resources in initialization response", ->
+        test_server = McpServer!
+
+        init_message = {
+          jsonrpc: "2.0"
+          id: 1
+          method: "initialize"
+          params: {
+            protocolVersion: "2025-06-18"
+          }
+        }
+
+        response = test_server\handle_initialize(init_message)
+
+        assert.same {
+          tools: {
+            listChanged: true
+          }
+          resources: {
+            subscribe: false
+            listChanged: true
+          }
+        }, response.result.capabilities
 

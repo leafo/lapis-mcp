@@ -100,7 +100,6 @@ class McpServer
   -- add tool to the server
   -- https://modelcontextprotocol.io/docs/concepts/tools#tool-definition-structure
   @add_tool: (details, call_fn) =>
-    -- Initialize tools registry on this class if it doesn't exist
     unless rawget(@, "tools")
       rawset(@, "tools", {})
 
@@ -113,20 +112,49 @@ class McpServer
       hidden: details.hidden or false
     }
 
-    -- Insert tool into array
     table.insert(rawget(@, "tools"), tool_def)
+
+  -- add resource to the server
+  -- https://modelcontextprotocol.io/specification/2024-11-05/server/resources.md
+  -- https://modelcontextprotocol.io/docs/concepts/resources#direct-resources
+  -- https://modelcontextprotocol.io/docs/concepts/resources#resource-templates
+  @add_resource: (details, read_fn) =>
+    unless rawget(@, "resources")
+      rawset(@, "resources", {})
+
+    resource_def = {
+      uri: details.uri
+      uriTemplate: details.uriTemplate
+
+      name: details.name
+      description: details.description
+      mimeType: details.mimeType
+
+      annotations: details.annotations
+      handler: read_fn
+      hidden: details.hidden or false
+    }
+
+    table.insert(rawget(@, "resources"), resource_def)
 
   -- send tools list changed notification
   notify_tools_list_changed: =>
     return unless @initialized
 
-    notification = {
+    @write_json_chunk {
       jsonrpc: "2.0"
       method: "notifications/tools/list_changed"
     }
-
-    @write_json_chunk notification
     @debug_log "info", "Sent tools/list_changed notification"
+
+  notify_resources_list_changed: =>
+    return unless @initialized
+
+    @write_json_chunk {
+      jsonrpc: "2.0"
+      method: "notifications/resources/list_changed"
+    }
+    @debug_log "info", "Sent resources/list_changed notification"
 
   -- set tool visibility on this instance
   -- tool_name can be a string (with visible param) or a table of name: visibility pairs
@@ -165,6 +193,10 @@ class McpServer
     @protocol_version = "2025-06-18"
     @server_capabilities = {
       tools: {
+        listChanged: true
+      }
+      resources: {
+        subscribe: false
         listChanged: true
       }
     }
@@ -207,6 +239,19 @@ class McpServer
       current_class = current_class.__parent
     nil
 
+  find_resource: (uri) =>
+    -- Search up the inheritance chain for the resource
+    current_class = @.__class
+    while current_class
+      resources = rawget(current_class, "resources")
+      if resources
+        -- Search through the array for the resource by URI
+        for resource in *resources
+          if resource.uri == uri
+            return resource
+      current_class = current_class.__parent
+    nil
+
   -- IO and message handling
   read_json_chunk: =>
     @transport\read_json_chunk!
@@ -231,6 +276,11 @@ class McpServer
         @handle_tools_list message
       when "tools/call"
         @handle_tools_call message
+      when "resources/list"
+        @debug_log "info", "Listing available resources"
+        @handle_resources_list message
+      when "resources/read"
+        @handle_resources_read message
       when "ping"
         @handle_ping message
       else
@@ -285,6 +335,8 @@ class McpServer
     @@server_name or @@__name
 
   server_specification: =>
+    capabilities = {k,v for k, v in pairs @server_capabilities}
+
     {
       protocolVersion: @protocol_version
       capabilities: @server_capabilities
@@ -407,6 +459,19 @@ class McpServer
       current_class = current_class.__parent
     all_tools
 
+  -- Get all resources from the inheritance chain
+  get_all_resources: =>
+    all_resources = {}
+    current_class = @__class
+    while current_class
+      if resources = rawget(current_class, "resources")
+        for resource in *resources
+          unless all_resources[resource.uri]  -- Don't override resources from parent classes
+            all_resources[resource.uri] = resource
+
+      current_class = current_class.__parent
+    all_resources
+
   -- Get tools list response (for API and testing)
   handle_tools_list: with_initialized (message) =>
     tools_list = for name, tool in pairs @get_all_tools!
@@ -431,6 +496,104 @@ class McpServer
       id: message.id
       result: {
         tools: tools_list
+      }
+    }
+
+  -- Get resources list response (for API and testing)
+  handle_resources_list: with_initialized (message) =>
+    resources_list = for uri, resource in pairs @get_all_resources!
+      -- Check instance visibility override first, then resource default
+      is_visible = if @tool_visibility[resource.uri] != nil
+        @tool_visibility[resource.uri]
+      else
+        not resource.hidden
+
+      continue unless is_visible
+      {
+        uri: resource.uri
+        name: resource.name
+        description: resource.description
+        mimeType: resource.mimeType
+        annotations: resource.annotations
+      }
+
+    table.sort resources_list, (a, b) -> a.uri < b.uri
+
+    {
+      jsonrpc: "2.0"
+      id: message.id
+      result: {
+        resources: resources_list
+      }
+    }
+
+  -- Handle resources/read request
+  handle_resources_read: with_initialized (message) =>
+    resource_uri = message.params.uri
+
+    @debug_log "info", "Reading resource: #{resource_uri}"
+
+    resource = @find_resource resource_uri
+
+    unless resource
+      return {
+        jsonrpc: "2.0"
+        id: message.id
+        error: {
+          code: -32002
+          message: "Resource not found: #{resource_uri}"
+        }
+      }
+
+    -- Call the resource handler
+    ok, result_or_error, user_error = pcall(resource.handler, @, message.params)
+
+    if not ok
+      @debug_log "error", "Resource read failed: #{result_or_error}"
+      return {
+        jsonrpc: "2.0"
+        id: message.id
+        error: {
+          code: -32603
+          message: "Error reading resource: #{result_or_error}"
+        }
+      }
+
+    -- wrap nil, err into error response
+    if result_or_error == nil
+      @debug_log "warning", "Resource returned error: #{user_error or "Unknown error"}"
+      return {
+        jsonrpc: "2.0"
+        id: message.id
+        error: {
+          code: -32603
+          message: "Error reading resource: #{user_error or "Unknown error"}"
+        }
+      }
+
+    @debug_log "success", "Resource read successfully: #{resource_uri}"
+
+    -- Ensure result is in the correct format for resources/read response
+    contents = if type(result_or_error) == "table" and result_or_error.contents
+      result_or_error.contents
+    else
+      {
+        {
+          uri: resource_uri
+          mimeType: resource.mimeType or "text/plain"
+          text: switch type result_or_error
+            when "string"
+              result_or_error
+            else
+              json.encode(result_or_error) or tostring(result_or_error)
+        }
+      }
+
+    {
+      jsonrpc: "2.0"
+      id: message.id
+      result: {
+        contents: contents
       }
     }
 
