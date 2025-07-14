@@ -512,7 +512,7 @@ class McpServer
       jsonrpc: "2.0"
       id: message.id
       result: {
-        tools: tools_list
+        tools: setmetatable tools_list, json.array_mt
       }
     }
 
@@ -542,7 +542,7 @@ class McpServer
       jsonrpc: "2.0"
       id: message.id
       result: {
-        resources: resources_list
+        resources: setmetatable resources_list, json.array_mt
       }
     }
 
@@ -573,7 +573,7 @@ class McpServer
       jsonrpc: "2.0"
       id: message.id
       result: {
-        resourceTemplates: resource_templates
+        resourceTemplates: setmetatable resource_templates, json.array_mt
       }
     }
 
