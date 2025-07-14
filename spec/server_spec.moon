@@ -964,85 +964,6 @@ describe "McpServer", ->
 
       assert.equal initial_count + 1, #mock_transport.messages
 
-describe "LapisMcpServer", ->
-  LapisMcpServer = require "lapis.mcp.lapis_server"
-
-  local mock_app, server
-
-  before_each ->
-    mock_app = ->
-      router: {
-        named_routes: {
-          root: { "/", "GET" }
-          users: { "/users", "GET" }
-          user: { "/users/:id", "GET" }
-        }
-        build: ->
-      }
-    server = LapisMcpServer {
-      app: mock_app
-    }
-
-  it "get_all_tools", ->
-    tools = server\get_all_tools!
-
-    assert.is_not_nil tools.list_routes
-    assert.is_not_nil tools.list_models
-    assert.is_not_nil tools.schema
-
-    -- Check list_routes tool structure
-    list_routes_tool = tools.list_routes
-
-    assert.equal "list_routes", list_routes_tool.name
-    assert.equal "List Routes", list_routes_tool.annotations.title
-    assert.is_string list_routes_tool.description
-    assert.is_table list_routes_tool.inputSchema
-
-  it "find_tool", ->
-    tool = server\find_tool("list_routes")
-    assert.is_not_nil tool
-    assert.equal "list_routes", tool.name
-    assert.equal "List Routes", tool.annotations.title
-
-  describe "routes tool", ->
-    before_each ->
-      server\skip_initialize!
-
-    it "should extract routes from app via full tool call", ->
-      -- Call list_routes tool through the full MCP flow
-      response = server\handle_tools_call {
-        jsonrpc: "2.0"
-        id: 2
-        method: "tools/call"
-        params: {
-          name: "list_routes"
-          arguments: {}
-        }
-      }
-
-      assert.equal "2.0", response.jsonrpc
-      assert.equal 2, response.id
-      assert.is_table response.result
-      assert.is_false response.result.isError
-      assert.is_table response.result.content
-      assert.equal "text", response.result.content[1].type
-
-      -- Parse the JSON response to check the actual routes
-      routes = json.decode(response.result.content[1].text)
-
-      assert.is_table routes
-      assert.equal 3, #routes
-
-      -- Check that routes are sorted
-      assert.equal "root", routes[1][1]
-      assert.equal "user", routes[2][1]
-      assert.equal "users", routes[3][1]
-
-      -- Check route structure
-      assert.is_table routes[1][2]
-      assert.equal "/", routes[1][2][1]
-      assert.equal "GET", routes[1][2][2]
-
   describe "resources", ->
     describe "basic resource functionality", ->
       it "should add and find resources", ->
@@ -1347,4 +1268,611 @@ describe "LapisMcpServer", ->
             listChanged: true
           }
         }, response.result.capabilities
+
+    describe "URI template resources", ->
+      describe "basic URI template functionality", ->
+        it "should add resources with uriTemplate", ->
+          class TemplateResourceServer extends McpServer
+            @add_resource {
+              uriTemplate: "app://users/{userId}"
+              name: "User Resource"
+              description: "A user resource with ID parameter"
+              mimeType: "application/json"
+            }, (params) => {id: params.userId, name: "User #{params.userId}"}
+
+          server = TemplateResourceServer!
+
+          resource = server\find_resource("app://other/world")
+          assert.is_nil resource
+
+          -- Should find template by matching URI
+          resource = server\find_resource("app://users/123")
+          assert.is_not_nil resource
+          assert.equal "app://users/{userId}", resource.uriTemplate
+          assert.equal "User Resource", resource.name
+
+        it "should handle multiple template parameters", ->
+          class MultiParamServer extends McpServer
+            @add_resource {
+              uriTemplate: "app://orgs/{orgId}/users/{userId}"
+              name: "Organization User"
+              description: "User resource within organization"
+              mimeType: "application/json"
+            }, (params) => {
+              org: params.orgId
+              user: params.userId
+              path: "orgs/#{params.orgId}/users/#{params.userId}"
+            }
+
+          server = MultiParamServer!
+          resource = server\find_resource("app://orgs/acme/users/123")
+          assert.is_not_nil resource
+          assert.equal "app://orgs/{orgId}/users/{userId}", resource.uriTemplate
+
+        it "should handle query parameters in templates", ->
+          class QueryTemplateServer extends McpServer
+            @add_resource {
+              uriTemplate: "app://api/items{?sort,limit}"
+              name: "Items API"
+              description: "Items with optional sorting and limit"
+              mimeType: "application/json"
+            }, (params) => {
+              items: {"item1", "item2", "item3"}
+              sort: params.sort or "name"
+              limit: tonumber(params.limit) or 10
+            }
+
+          server = QueryTemplateServer!
+
+          -- Should match without query params
+          resource = server\find_resource("app://api/items")
+          assert.is_not_nil resource
+          assert.equal "app://api/items{?sort,limit}", resource.uriTemplate
+
+          -- Should match with query params
+          resource = server\find_resource("app://api/items?sort=date&limit=5")
+          assert.is_not_nil resource
+          assert.equal "app://api/items{?sort,limit}", resource.uriTemplate
+
+        it "should handle mixed path and query parameters", ->
+          class MixedTemplateServer extends McpServer
+            @add_resource {
+              uriTemplate: "app://posts/{postId}/comments{?limit,offset}"
+              name: "Post Comments"
+              description: "Comments for a specific post"
+              mimeType: "application/json"
+            }, (params) => {
+              post_id: params.postId
+              limit: tonumber(params.limit) or 20
+              offset: tonumber(params.offset) or 0
+              comments: {"comment1", "comment2"}
+            }
+
+          server = MixedTemplateServer!
+          resource = server\find_resource("app://posts/123/comments?limit=10")
+          assert.is_not_nil resource
+          assert.equal "app://posts/{postId}/comments{?limit,offset}", resource.uriTemplate
+
+      describe "template resource resolution", ->
+        local server
+        before_each ->
+          class TemplateTestServer extends McpServer
+            @add_resource {
+              uri: "app://static/resource"
+              name: "Static Resource"
+              description: "A static resource"
+              mimeType: "text/plain"
+            }, -> "Static content"
+
+            @add_resource {
+              uriTemplate: "app://users/{userId}"
+              name: "User Resource"
+              description: "Dynamic user resource"
+              mimeType: "application/json"
+            }, (params) => {
+              id: params.userId
+              name: "User #{params.userId}"
+              type: "user"
+            }
+
+            @add_resource {
+              uriTemplate: "app://users/{userId}/posts/{postId}"
+              name: "User Post"
+              description: "Specific user post"
+              mimeType: "application/json"
+            }, (params) => {
+              user_id: params.userId
+              post_id: params.postId
+              title: "Post #{params.postId} by User #{params.userId}"
+            }
+
+            @add_resource {
+              uriTemplate: "app://search{?q,limit}"
+              name: "Search API"
+              description: "Search with query parameters"
+              mimeType: "application/json"
+            }, (params) => {
+              query: params.q or ""
+              limit: tonumber(params.limit) or 10
+              results: {"result1", "result2"}
+            }
+
+          server = TemplateTestServer!
+          server\skip_initialize!
+
+        it "should prioritize exact URI matches over templates", ->
+          resource = server\find_resource("app://static/resource")
+          assert.is_not_nil resource
+          assert.equal "app://static/resource", resource.uri
+          assert.is_nil resource.uriTemplate
+
+        it "should match single parameter templates", ->
+          resource = server\find_resource("app://users/123")
+          assert.is_not_nil resource
+          assert.equal "app://users/{userId}", resource.uriTemplate
+
+        it "should match multiple parameter templates", ->
+          resource = server\find_resource("app://users/123/posts/456")
+          assert.is_not_nil resource
+          assert.equal "app://users/{userId}/posts/{postId}", resource.uriTemplate
+
+        it "should match query parameter templates", ->
+          resource = server\find_resource("app://search?q=test&limit=5")
+          assert.is_not_nil resource
+          assert.equal "app://search{?q,limit}", resource.uriTemplate
+
+        it "should return nil for non-matching URIs", ->
+          resource = server\find_resource("app://nonexistent/resource")
+          assert.is_nil resource
+
+        it "should handle partial query parameter matches", ->
+          resource = server\find_resource("app://search?q=test")
+          assert.is_not_nil resource
+          assert.equal "app://search{?q,limit}", resource.uriTemplate
+
+      describe "template resource reading", ->
+        local server
+        before_each ->
+          class ReadTemplateServer extends McpServer
+            @add_resource {
+              uriTemplate: "app://users/{userId}"
+              name: "User Resource"
+              description: "User data"
+              mimeType: "application/json"
+            }, (params) => {
+              id: params.userId
+              name: "User #{params.userId}"
+              email: "user#{params.userId}@example.com"
+            }
+
+            @add_resource {
+              uriTemplate: "app://files/{path}"
+              name: "File Resource"
+              description: "File content"
+              mimeType: "text/plain"
+            }, (params) => "File content for #{params.path}"
+
+            @add_resource {
+              uriTemplate: "app://api/data{?format}"
+              name: "Data API"
+              description: "Data with optional format"
+              mimeType: "application/json"
+            }, (params) =>
+              data = {items: {"a", "b", "c"}}
+              if params.format == "xml"
+                return "<items><item>a</item><item>b</item><item>c</item></items>"
+              data
+
+            @add_resource {
+              uriTemplate: "app://error/{type}"
+              name: "Error Resource"
+              description: "Resource that can error"
+              mimeType: "text/plain"
+            }, (params) =>
+              if params.type == "fail"
+                return nil, "Intentional error"
+              "Success for #{params.type}"
+
+          server = ReadTemplateServer!
+          server\skip_initialize!
+
+        it "should read template resource with parameters", ->
+          response = server\handle_resources_read {
+            jsonrpc: "2.0"
+            id: 1
+            method: "resources/read"
+            params: {
+              uri: "app://users/123"
+            }
+          }
+
+          assert.equal "2.0", response.jsonrpc
+          assert.equal 1, response.id
+          assert.is_table response.result
+          assert.is_table response.result.contents
+          assert.equal 1, #response.result.contents
+
+          content = response.result.contents[1]
+          assert.equal "app://users/123", content.uri
+          assert.equal "application/json", content.mimeType
+
+          decoded = json.decode(content.text)
+          assert.same {
+            id: "123"
+            name: "User 123"
+            email: "user123@example.com"
+          }, decoded
+
+        it "should read template resource with path parameters", ->
+          response = server\handle_resources_read {
+            jsonrpc: "2.0"
+            id: 1
+            method: "resources/read"
+            params: {
+              uri: "app://files/document.txt"
+            }
+          }
+
+          assert.equal "2.0", response.jsonrpc
+          assert.equal 1, response.id
+          content = response.result.contents[1]
+          assert.equal "app://files/document.txt", content.uri
+          assert.equal "text/plain", content.mimeType
+          assert.equal "File content for document.txt", content.text
+
+        it "should read template resource with query parameters", ->
+          response = server\handle_resources_read {
+            jsonrpc: "2.0"
+            id: 1
+            method: "resources/read"
+            params: {
+              uri: "app://api/data?format=json"
+            }
+          }
+
+          assert.equal "2.0", response.jsonrpc
+          assert.equal 1, response.id
+          content = response.result.contents[1]
+          assert.equal "app://api/data?format=json", content.uri
+
+          decoded = json.decode(content.text)
+          assert.same {items: {"a", "b", "c"}}, decoded
+
+        it "should handle template resource returning string", ->
+          response = server\handle_resources_read {
+            jsonrpc: "2.0"
+            id: 1
+            method: "resources/read"
+            params: {
+              uri: "app://api/data?format=xml"
+            }
+          }
+
+          content = response.result.contents[1]
+          assert.equal "<items><item>a</item><item>b</item><item>c</item></items>", content.text
+
+        it "should handle template resource errors", ->
+          response = server\handle_resources_read {
+            jsonrpc: "2.0"
+            id: 1
+            method: "resources/read"
+            params: {
+              uri: "app://error/fail"
+            }
+          }
+
+          assert.same {
+            jsonrpc: "2.0"
+            id: 1
+            error: {
+              code: -32603
+              message: "Error reading resource: Intentional error"
+            }
+          }, response
+
+        it "should handle template resource success", ->
+          response = server\handle_resources_read {
+            jsonrpc: "2.0"
+            id: 1
+            method: "resources/read"
+            params: {
+              uri: "app://error/success"
+            }
+          }
+
+          content = response.result.contents[1]
+          assert.equal "Success for success", content.text
+
+      describe "template resource listing", ->
+        local server
+        before_each ->
+          class ListTemplateServer extends McpServer
+            @add_resource {
+              uri: "app://static/resource"
+              name: "Static Resource"
+              description: "A static resource"
+              mimeType: "text/plain"
+            }, -> "Static content"
+
+            @add_resource {
+              uriTemplate: "app://users/{userId}"
+              name: "User Resource"
+              description: "Dynamic user resource"
+              mimeType: "application/json"
+            }, (params) => {id: params.userId}
+
+            @add_resource {
+              uriTemplate: "app://posts/{postId}/comments{?limit}"
+              name: "Post Comments"
+              description: "Comments for a post"
+              mimeType: "application/json"
+              hidden: true
+            }, (params) => {comments: {}}
+
+          server = ListTemplateServer!
+          server\skip_initialize!
+
+        it "should list template resources in resources/list", ->
+          response = server\handle_resources_list {
+            jsonrpc: "2.0"
+            id: 1
+            method: "resources/list"
+          }
+
+          assert.equal "2.0", response.jsonrpc
+          assert.equal 1, response.id
+          assert.is_table response.result.resources
+          assert.equal 2, #response.result.resources -- Static + template (hidden excluded)
+
+          -- Check that template resources are listed with uriTemplate
+          found_template = false
+          found_static = false
+          for resource in *response.result.resources
+            if resource.uriTemplate == "app://users/{userId}"
+              found_template = true
+              assert.equal "User Resource", resource.name
+              assert.equal "Dynamic user resource", resource.description
+              assert.equal "application/json", resource.mimeType
+            elseif resource.uri == "app://static/resource"
+              found_static = true
+              assert.equal "Static Resource", resource.name
+
+          assert.is_true found_template
+          assert.is_true found_static
+
+        it "should exclude hidden template resources", ->
+          response = server\handle_resources_list {
+            jsonrpc: "2.0"
+            id: 1
+            method: "resources/list"
+          }
+
+          -- Should not include hidden template resource
+          for resource in *response.result.resources
+            assert.is_not_equal "app://posts/{postId}/comments{?limit}", resource.uriTemplate
+
+      describe "template resource inheritance", ->
+        it "should handle template resource inheritance", ->
+          class BaseTemplateServer extends McpServer
+            @add_resource {
+              uriTemplate: "app://base/{id}"
+              name: "Base Resource"
+              description: "Base template resource"
+              mimeType: "text/plain"
+            }, (params) => "Base #{params.id}"
+
+          class DerivedTemplateServer extends BaseTemplateServer
+            @add_resource {
+              uriTemplate: "app://derived/{id}"
+              name: "Derived Resource"
+              description: "Derived template resource"
+              mimeType: "text/plain"
+            }, (params) => "Derived #{params.id}"
+
+            @add_resource {
+              uriTemplate: "app://base/{id}"
+              name: "Overridden Base"
+              description: "Overridden base resource"
+              mimeType: "text/plain"
+            }, (params) => "Overridden #{params.id}"
+
+          server = DerivedTemplateServer!
+          server\skip_initialize!
+
+          -- Should find overridden base resource
+          response = server\handle_resources_read {
+            jsonrpc: "2.0"
+            id: 1
+            method: "resources/read"
+            params: {uri: "app://base/123"}
+          }
+          content = response.result.contents[1]
+          assert.equal "Overridden 123", content.text
+
+          -- Should find derived resource
+          response = server\handle_resources_read {
+            jsonrpc: "2.0"
+            id: 2
+            method: "resources/read"
+            params: {uri: "app://derived/456"}
+          }
+          content = response.result.contents[1]
+          assert.equal "Derived 456", content.text
+
+      describe "advanced template patterns", ->
+        local server
+        before_each ->
+          class AdvancedTemplateServer extends McpServer
+            @add_resource {
+              uriTemplate: "app://api/v{version}/users/{userId}"
+              name: "Versioned User API"
+              description: "User API with version"
+              mimeType: "application/json"
+            }, (params) => {
+              version: params.version
+              user_id: params.userId
+              api_version: "v#{params.version}"
+            }
+
+            @add_resource {
+              uriTemplate: "app://files/{path}/{filename}.{ext}"
+              name: "File Resource"
+              description: "File with path and extension"
+              mimeType: "text/plain"
+            }, (params) => "File: #{params.path}/#{params.filename}.#{params.ext}"
+
+            @add_resource {
+              uriTemplate: "app://search{?q,sort,limit,offset}"
+              name: "Advanced Search"
+              description: "Search with multiple query parameters"
+              mimeType: "application/json"
+            }, (params) => {
+              query: params.q or ""
+              sort: params.sort or "relevance"
+              limit: tonumber(params.limit) or 10
+              offset: tonumber(params.offset) or 0
+            }
+
+          server = AdvancedTemplateServer!
+          server\skip_initialize!
+
+        it "should handle versioned API templates", ->
+          response = server\handle_resources_read {
+            jsonrpc: "2.0"
+            id: 1
+            method: "resources/read"
+            params: {uri: "app://api/v2/users/123"}
+          }
+
+          content = response.result.contents[1]
+          decoded = json.decode(content.text)
+          assert.same {
+            version: "2"
+            user_id: "123"
+            api_version: "v2"
+          }, decoded
+
+        it "should handle file path templates", ->
+          response = server\handle_resources_read {
+            jsonrpc: "2.0"
+            id: 1
+            method: "resources/read"
+            params: {uri: "app://files/docs/readme.txt"}
+          }
+
+          content = response.result.contents[1]
+          assert.equal "File: docs/readme.txt", content.text
+
+        it "should handle complex query parameter templates", ->
+          response = server\handle_resources_read {
+            jsonrpc: "2.0"
+            id: 1
+            method: "resources/read"
+            params: {uri: "app://search?q=test&sort=date&limit=5&offset=10"}
+          }
+
+          content = response.result.contents[1]
+          decoded = json.decode(content.text)
+          assert.same {
+            query: "test"
+            sort: "date"
+            limit: 5
+            offset: 10
+          }, decoded
+
+        it "should handle partial query parameters", ->
+          response = server\handle_resources_read {
+            jsonrpc: "2.0"
+            id: 1
+            method: "resources/read"
+            params: {uri: "app://search?q=test"}
+          }
+
+          content = response.result.contents[1]
+          decoded = json.decode(content.text)
+          assert.same {
+            query: "test"
+            sort: "relevance"
+            limit: 10
+            offset: 0
+          }, decoded
+
+describe "LapisMcpServer", ->
+  LapisMcpServer = require "lapis.mcp.lapis_server"
+
+  local mock_app, server
+
+  before_each ->
+    mock_app = ->
+      router: {
+        named_routes: {
+          root: { "/", "GET" }
+          users: { "/users", "GET" }
+          user: { "/users/:id", "GET" }
+        }
+        build: ->
+      }
+    server = LapisMcpServer {
+      app: mock_app
+    }
+
+  it "get_all_tools", ->
+    tools = server\get_all_tools!
+
+    assert.is_not_nil tools.list_routes
+    assert.is_not_nil tools.list_models
+    assert.is_not_nil tools.schema
+
+    -- Check list_routes tool structure
+    list_routes_tool = tools.list_routes
+
+    assert.equal "list_routes", list_routes_tool.name
+    assert.equal "List Routes", list_routes_tool.annotations.title
+    assert.is_string list_routes_tool.description
+    assert.is_table list_routes_tool.inputSchema
+
+  it "find_tool", ->
+    tool = server\find_tool("list_routes")
+    assert.is_not_nil tool
+    assert.equal "list_routes", tool.name
+    assert.equal "List Routes", tool.annotations.title
+
+  describe "routes tool", ->
+    before_each ->
+      server\skip_initialize!
+
+    it "should extract routes from app via full tool call", ->
+      -- Call list_routes tool through the full MCP flow
+      response = server\handle_tools_call {
+        jsonrpc: "2.0"
+        id: 2
+        method: "tools/call"
+        params: {
+          name: "list_routes"
+          arguments: {}
+        }
+      }
+
+      assert.equal "2.0", response.jsonrpc
+      assert.equal 2, response.id
+      assert.is_table response.result
+      assert.is_false response.result.isError
+      assert.is_table response.result.content
+      assert.equal "text", response.result.content[1].type
+
+      -- Parse the JSON response to check the actual routes
+      routes = json.decode(response.result.content[1].text)
+
+      assert.is_table routes
+      assert.equal 3, #routes
+
+      -- Check that routes are sorted
+      assert.equal "root", routes[1][1]
+      assert.equal "user", routes[2][1]
+      assert.equal "users", routes[3][1]
+
+      -- Check route structure
+      assert.is_table routes[1][2]
+      assert.equal "/", routes[1][2][1]
+      assert.equal "GET", routes[1][2][2]
 
