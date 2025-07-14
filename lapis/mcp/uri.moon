@@ -39,7 +39,7 @@ capture_param = Cmt param, (str, pos, capture_name) ->
   -- print "got capture name", capture_name
   rest = str\sub pos
 
-  value_char = P(1)
+  value_char = P(1) - P"/"
 
   if exclude = find_terminate rest
     value_char = value_char - exclude

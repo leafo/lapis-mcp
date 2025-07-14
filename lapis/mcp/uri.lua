@@ -28,7 +28,7 @@ find_terminate = function(rest)
 end
 local capture_param = Cmt(param, function(str, pos, capture_name)
   local rest = str:sub(pos)
-  local value_char = P(1)
+  local value_char = P(1) - P("/")
   do
     local exclude = find_terminate(rest)
     if exclude then
