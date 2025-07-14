@@ -1,11 +1,11 @@
 -- This generates a basic URI parser from a URI template string to extract parameters
 -- from an incoming URL generate by the expansion string
 --
--- Note that URI templates are a pattern for expansion, not for parsing, but we
+-- NOTE: URI templates are a pattern for expansion, not for parsing, but we
 -- implement a basic parser to make it easier to extract parameters from the
--- incoming URL when the resource request is incoming"
-
--- NOTE: This supports very basic syntax just to get simple resources working
+-- incoming URL when the resource request is incoming. Only a subset of the
+-- spec is implemented
+--
 -- example: app://games/{id}{?fields}
 
 -- Create LPEG patterns
@@ -75,7 +75,7 @@ join_patterns = (left, right) -> left * right
 parse_template = Cf(part * part^0, join_patterns) / (p) -> Ct(p) * P(-1)
 
 -- pattern = assert parse_template\match "hello://world/{id}/zone/{age}"
--- 
+--
 -- print pattern\match("hello://world/123") --> nil
 -- print pattern\match("hello://world/123/zone/99") --> {id = "123", age = "99"}
 

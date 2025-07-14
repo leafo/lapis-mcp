@@ -231,8 +231,17 @@ do
         if resources then
           for _index_0 = 1, #resources do
             local resource = resources[_index_0]
-            if resource.uri == uri then
-              return resource
+            if resource.lpeg_pattern then
+              do
+                local uri_params = resource.lpeg_pattern:match(uri)
+                if uri_params then
+                  return resource, uri_params
+                end
+              end
+            else
+              if resource.uri == uri then
+                return resource, { }
+              end
             end
           end
         end
@@ -562,7 +571,7 @@ do
     handle_resources_read = with_initialized(function(self, message)
       local resource_uri = message.params.uri
       self:debug_log("info", "Reading resource: " .. tostring(resource_uri))
-      local resource = self:find_resource(resource_uri)
+      local resource, uri_params = self:find_resource(resource_uri)
       if not (resource) then
         return {
           jsonrpc = "2.0",
@@ -573,7 +582,7 @@ do
           }
         }
       end
-      local ok, result_or_error, user_error = pcall(resource.handler, self, message.params)
+      local ok, result_or_error, user_error = pcall(resource.handler, self, uri_params, message)
       if not ok then
         self:debug_log("error", "Resource read failed: " .. tostring(result_or_error))
         return {
@@ -746,9 +755,16 @@ do
     if not (rawget(self, "resources")) then
       rawset(self, "resources", { })
     end
+    local lpeg_pattern
+    if details.uriTemplate then
+      local parse_template
+      parse_template = require("lapis.mcp.uri").parse_template
+      lpeg_pattern = parse_template:match(details.uriTemplate)
+    end
     local resource_def = {
       uri = details.uri,
       uriTemplate = details.uriTemplate,
+      lpeg_pattern = lpeg_pattern,
       name = details.name,
       description = details.description,
       mimeType = details.mimeType,

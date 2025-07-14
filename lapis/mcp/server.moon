@@ -122,9 +122,15 @@ class McpServer
     unless rawget(@, "resources")
       rawset(@, "resources", {})
 
+    lpeg_pattern = if details.uriTemplate
+      import parse_template from require "lapis.mcp.uri"
+      parse_template\match details.uriTemplate
+
     resource_def = {
       uri: details.uri
       uriTemplate: details.uriTemplate
+
+      :lpeg_pattern
 
       name: details.name
       description: details.description
@@ -242,13 +248,19 @@ class McpServer
   find_resource: (uri) =>
     -- Search up the inheritance chain for the resource
     current_class = @.__class
+
     while current_class
       resources = rawget(current_class, "resources")
       if resources
         -- Search through the array for the resource by URI
         for resource in *resources
-          if resource.uri == uri
-            return resource
+          if resource.lpeg_pattern
+            if uri_params = resource.lpeg_pattern\match uri
+              return resource, uri_params
+          else
+            if resource.uri == uri
+              return resource, {}
+
       current_class = current_class.__parent
     nil
 
@@ -536,7 +548,7 @@ class McpServer
 
     @debug_log "info", "Reading resource: #{resource_uri}"
 
-    resource = @find_resource resource_uri
+    resource, uri_params = @find_resource resource_uri
 
     unless resource
       return {
@@ -549,7 +561,7 @@ class McpServer
       }
 
     -- Call the resource handler
-    ok, result_or_error, user_error = pcall(resource.handler, @, message.params)
+    ok, result_or_error, user_error = pcall(resource.handler, @, uri_params, message)
 
     if not ok
       @debug_log "error", "Resource read failed: #{result_or_error}"
