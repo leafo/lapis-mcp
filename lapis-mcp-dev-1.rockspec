@@ -27,6 +27,7 @@ build = {
     ["lapis.cmd.actions.mcp"] = "lapis/cmd/actions/mcp.lua",
     ["lapis.mcp.server"] = "lapis/mcp/server.lua",
     ["lapis.mcp.cli"] = "lapis/mcp/cli.lua",
-    ["lapis.mcp.lapis_server"] = "lapis/mcp/lapis_server.lua"
+    ["lapis.mcp.lapis_server"] = "lapis/mcp/lapis_server.lua",
+    ["lapis.mcp.uri"] = "lapis/mcp/uri.lua"
   }
 }
