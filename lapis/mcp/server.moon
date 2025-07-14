@@ -667,6 +667,24 @@ class McpServer
   send_message: (message) =>
     @handle_message message
 
+  xml_response: (fn) =>
+    -- this should create a buffer that can be used to generate a prompt using xml tags to wrap chunks of data
+    import Buffer, element from require "lapis.html"
+
+    buffer = Buffer {}
+
+    fn setmetatable {
+      raw: (...) -> buffer\write ...
+      text: (...) -> buffer\write ...
+    }, {
+      __index: (key) =>
+        (...) ->
+          element buffer, key, ...
+          @text "\n"
+    }
+
+    table.concat buffer.buffer
+
   -- Server main loop
   run_stdio: =>
     @debug_log "info", table.concat {

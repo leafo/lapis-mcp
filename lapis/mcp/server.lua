@@ -704,6 +704,30 @@ do
     send_message = function(self, message)
       return self:handle_message(message)
     end,
+    xml_response = function(self, fn)
+      local Buffer, element
+      do
+        local _obj_0 = require("lapis.html")
+        Buffer, element = _obj_0.Buffer, _obj_0.element
+      end
+      local buffer = Buffer({ })
+      fn(setmetatable({
+        raw = function(...)
+          return buffer:write(...)
+        end,
+        text = function(...)
+          return buffer:write(...)
+        end
+      }, {
+        __index = function(self, key)
+          return function(...)
+            element(buffer, key, ...)
+            return self:text("\n")
+          end
+        end
+      }))
+      return table.concat(buffer.buffer)
+    end,
     run_stdio = function(self)
       self:debug_log("info", table.concat({
         "Starting MCP server " .. tostring(self:get_server_name()) .. " in stdio mode",
