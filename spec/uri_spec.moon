@@ -52,6 +52,10 @@ describe "lapis.mcp.uri", ->
       result = pattern\match "https://api.example.com/v1/users/user123/profile"
       assert.same {id: "user123"}, result
 
+    it "should verify to the end of the pattern", ->
+      pattern = assert parse_template\match "app://hello"
+      assert.is_nil pattern\match "app://hello/world"
+
     it "should fail to match when structure differs", ->
       pattern = parse_template\match "app://games/{id}"
       assert.is_not_nil pattern
@@ -59,10 +63,6 @@ describe "lapis.mcp.uri", ->
       -- Wrong scheme
       result = pattern\match "http://games/123"
       assert.is_nil result
-
-      -- Extra path segments
-      result = pattern\match "app://games/123/extra"
-      assert.same {id: "123/extra"}, result
 
       -- Missing parameter value
       result = pattern\match "app://games/"
@@ -138,3 +138,81 @@ describe "lapis.mcp.uri", ->
 
       result = pattern\match "app://static/different"
       assert.is_nil result
+
+  describe "query parameters", ->
+    it "should parse template with single query parameter", ->
+      pattern = parse_template\match "app://api/resource{?fields}"
+      assert.is_not_nil pattern
+
+      -- Should match without query parameter
+      result = pattern\match "app://api/resource"
+      assert.same {}, result
+
+      -- Should match with query parameter
+      result = pattern\match "app://api/resource?fields=name"
+      assert.same {fields: "name"}, result
+
+    it "should parse template with multiple query parameters", ->
+      pattern = parse_template\match "app://api/users{?sort,limit,offset}"
+      assert.is_not_nil pattern
+
+      -- Should match without query parameters
+      result = pattern\match "app://api/users"
+      assert.same {}, result
+
+      -- Should match with one query parameter
+      result = pattern\match "app://api/users?sort=name"
+      assert.same {sort: "name"}, result
+
+      -- Should match with multiple query parameters
+      result = pattern\match "app://api/users?sort=name&limit=10&offset=20"
+      assert.same {sort: "name", limit: "10", offset: "20"}, result
+
+      -- Should match with parameters in different order
+      result = pattern\match "app://api/users?limit=5&sort=age"
+      assert.same {sort: "age", limit: "5"}, result
+
+    it "should handle URL-encoded query parameter values", ->
+      pattern = parse_template\match "app://search{?q}"
+      assert.is_not_nil pattern
+
+      -- Should handle URL-encoded values
+      result = pattern\match "app://search?q=hello%20world"
+      assert.same {q: "hello world"}, result
+
+      result = pattern\match "app://search?q=test%2Bquery"
+      assert.same {q: "test+query"}, result
+
+    it "should combine path and query parameters", ->
+      pattern = parse_template\match "app://games/{id}{?details,format}"
+      assert.is_not_nil pattern
+
+      -- Should match with path parameter only
+      result = pattern\match "app://games/123"
+      assert.same {id: "123"}, result
+
+      -- Should match with path and query parameters
+      result = pattern\match "app://games/123?details=full&format=json"
+      assert.same {id: "123", details: "full", format: "json"}, result
+
+    it "should handle whitespace in query parameter templates", ->
+      pattern = parse_template\match "app://api/data{? sort , limit }"
+      assert.is_not_nil pattern
+
+      result = pattern\match "app://api/data?sort=name&limit=10"
+      assert.same {sort: "name", limit: "10"}, result
+
+    it "should handle empty query parameter values", ->
+      pattern = parse_template\match "app://api/items{?filter}"
+      assert.is_not_nil pattern
+
+      result = pattern\match "app://api/items?filter="
+      assert.same {filter: ""}, result
+
+  describe "whitespace handling", ->
+    it "should handle whitespace in path parameters", ->
+      pattern = parse_template\match "app://items/{ id }"
+      assert.is_not_nil pattern
+
+      result = pattern\match "app://items/123"
+      assert.same {id: "123"}, result
