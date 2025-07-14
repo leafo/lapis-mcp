@@ -291,6 +291,9 @@ class McpServer
       when "resources/list"
         @debug_log "info", "Listing available resources"
         @handle_resources_list message
+      when "resources/templates/list"
+        @debug_log "info", "Listing available resource templates"
+        @handle_resources_templates_list message
       when "resources/read"
         @handle_resources_read message
       when "ping"
@@ -523,8 +526,40 @@ class McpServer
         not resource.hidden
 
       continue unless is_visible
+      continue unless resource.uri
+
       {
         uri: resource.uri
+        name: resource.name
+        description: resource.description
+        mimeType: resource.mimeType
+        annotations: resource.annotations
+      }
+
+    table.sort resources_list, (a, b) -> a.uri < b.uri
+
+    {
+      jsonrpc: "2.0"
+      id: message.id
+      result: {
+        resources: resources_list
+      }
+    }
+
+  -- Get resource templates list response
+  handle_resources_templates_list: with_initialized (message) =>
+    resource_templates = for uri, resource in pairs @get_all_resources!
+      -- Only include resources that have uriTemplate
+      continue unless resource.uriTemplate
+
+      -- Check instance visibility override first, then resource default
+      is_visible = if @tool_visibility[resource.uri] != nil
+        @tool_visibility[resource.uri]
+      else
+        not resource.hidden
+
+      continue unless is_visible
+      {
         uriTemplate: resource.uriTemplate
         name: resource.name
         description: resource.description
@@ -532,13 +567,13 @@ class McpServer
         annotations: resource.annotations
       }
 
-    table.sort resources_list, (a, b) -> (a.uri or a.uriTemplate) < (b.uri or b.uriTemplate)
+    table.sort resource_templates, (a, b) -> a.uriTemplate < b.uriTemplate
 
     {
       jsonrpc: "2.0"
       id: message.id
       result: {
-        resources: resources_list
+        resourceTemplates: resource_templates
       }
     }
 

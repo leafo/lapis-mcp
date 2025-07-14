@@ -273,6 +273,9 @@ do
       elseif "resources/list" == _exp_0 then
         self:debug_log("info", "Listing available resources")
         return self:handle_resources_list(message)
+      elseif "resources/templates/list" == _exp_0 then
+        self:debug_log("info", "Listing available resource templates")
+        return self:handle_resources_templates_list(message)
       elseif "resources/read" == _exp_0 then
         return self:handle_resources_read(message)
       elseif "ping" == _exp_0 then
@@ -539,9 +542,12 @@ do
               _continue_0 = true
               break
             end
+            if not (resource.uri) then
+              _continue_0 = true
+              break
+            end
             local _value_0 = {
               uri = resource.uri,
-              uriTemplate = resource.uriTemplate,
               name = resource.name,
               description = resource.description,
               mimeType = resource.mimeType,
@@ -558,13 +564,63 @@ do
         resources_list = _accum_0
       end
       table.sort(resources_list, function(a, b)
-        return (a.uri or a.uriTemplate) < (b.uri or b.uriTemplate)
+        return a.uri < b.uri
       end)
       return {
         jsonrpc = "2.0",
         id = message.id,
         result = {
           resources = resources_list
+        }
+      }
+    end),
+    handle_resources_templates_list = with_initialized(function(self, message)
+      local resource_templates
+      do
+        local _accum_0 = { }
+        local _len_0 = 1
+        for uri, resource in pairs(self:get_all_resources()) do
+          local _continue_0 = false
+          repeat
+            if not (resource.uriTemplate) then
+              _continue_0 = true
+              break
+            end
+            local is_visible
+            if self.tool_visibility[resource.uri] ~= nil then
+              is_visible = self.tool_visibility[resource.uri]
+            else
+              is_visible = not resource.hidden
+            end
+            if not (is_visible) then
+              _continue_0 = true
+              break
+            end
+            local _value_0 = {
+              uriTemplate = resource.uriTemplate,
+              name = resource.name,
+              description = resource.description,
+              mimeType = resource.mimeType,
+              annotations = resource.annotations
+            }
+            _accum_0[_len_0] = _value_0
+            _len_0 = _len_0 + 1
+            _continue_0 = true
+          until true
+          if not _continue_0 then
+            break
+          end
+        end
+        resource_templates = _accum_0
+      end
+      table.sort(resource_templates, function(a, b)
+        return a.uriTemplate < b.uriTemplate
+      end)
+      return {
+        jsonrpc = "2.0",
+        id = message.id,
+        result = {
+          resourceTemplates = resource_templates
         }
       }
     end),

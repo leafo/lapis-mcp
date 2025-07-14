@@ -1069,6 +1069,22 @@ describe "McpServer", ->
         assert.equal "A visible resource", resource.description
         assert.equal "text/plain", resource.mimeType
 
+      it "should return empty list for resources/templates/list", ->
+        server\skip_initialize!
+        response = server\handle_resources_templates_list {
+          jsonrpc: "2.0"
+          id: 1
+          method: "resources/templates/list"
+        }
+
+        assert.same {
+          jsonrpc: "2.0",
+          id: 1,
+          result: {
+            resourceTemplates: {}
+          }
+        }, response
+
     describe "handle_resources_read", ->
       local server
       before_each ->
@@ -1612,44 +1628,49 @@ describe "McpServer", ->
           server = ListTemplateServer!
           server\skip_initialize!
 
-        it "should list template resources in resources/list", ->
+        it "should list only non-template resources in resources/list", ->
           response = server\handle_resources_list {
             jsonrpc: "2.0"
             id: 1
             method: "resources/list"
           }
+          assert.same {
+            id: 1,
+            jsonrpc: "2.0",
+            result: {
+              resources: {
+                {
+                  description: "A static resource",
+                  mimeType: "text/plain",
+                  name: "Static Resource",
+                  uri: "app://static/resource"
+                }
+              }
+            }
+          }, response
 
-          assert.equal "2.0", response.jsonrpc
-          assert.equal 1, response.id
-          assert.is_table response.result.resources
-          assert.equal 2, #response.result.resources -- Static + template (hidden excluded)
-
-          -- Check that template resources are listed with uriTemplate
-          found_template = false
-          found_static = false
-          for resource in *response.result.resources
-            if resource.uriTemplate == "app://users/{userId}"
-              found_template = true
-              assert.equal "User Resource", resource.name
-              assert.equal "Dynamic user resource", resource.description
-              assert.equal "application/json", resource.mimeType
-            elseif resource.uri == "app://static/resource"
-              found_static = true
-              assert.equal "Static Resource", resource.name
-
-          assert.is_true found_template
-          assert.is_true found_static
-
-        it "should exclude hidden template resources", ->
-          response = server\handle_resources_list {
+        it "should return correct list for resources/templates/list", ->
+          server\skip_initialize!
+          response = server\handle_resources_templates_list {
             jsonrpc: "2.0"
             id: 1
-            method: "resources/list"
+            method: "resources/templates/list"
           }
 
-          -- Should not include hidden template resource
-          for resource in *response.result.resources
-            assert.is_not_equal "app://posts/{postId}/comments{?limit}", resource.uriTemplate
+          assert.same {
+            id: 1,
+            jsonrpc: "2.0",
+            result: {
+              resourceTemplates: {
+                {
+                  description: "Dynamic user resource",
+                  mimeType: "application/json",
+                  name: "User Resource",
+                  uriTemplate: "app://users/{userId}"
+                }
+              }
+            }
+          }, response
 
       describe "template resource inheritance", ->
         it "should handle template resource inheritance", ->
