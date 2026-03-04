@@ -28,6 +28,9 @@ build = {
     ["lapis.mcp.server"] = "lapis/mcp/server.lua",
     ["lapis.mcp.cli"] = "lapis/mcp/cli.lua",
     ["lapis.mcp.lapis_server"] = "lapis/mcp/lapis_server.lua",
-    ["lapis.mcp.uri"] = "lapis/mcp/uri.lua"
+    ["lapis.mcp.uri"] = "lapis/mcp/uri.lua",
+    ["lapis.mcp.tool_call_interface"] = "lapis/mcp/tool_call_interface.lua",
+    ["lapis.mcp.tool_call_interface.openai"] = "lapis/mcp/tool_call_interface/openai.lua",
+    ["lapis.mcp.tool_call_interface.anthropic"] = "lapis/mcp/tool_call_interface/anthropic.lua"
   }
 }
