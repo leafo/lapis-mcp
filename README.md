@@ -322,6 +322,9 @@ Available adapters:
 
 #### OpenAI
 
+The OpenAI example below uses `lua-openai`:
+https://github.com/leafo/lua-openai
+
 ```moonscript
 import McpServer from require "lapis.mcp.server"
 OpenAIToolAdapter = require "lapis.mcp.tool_adapter.openai"

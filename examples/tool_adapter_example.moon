@@ -6,6 +6,7 @@
 -- 3. Send a prompt to OpenAI that triggers tool calls
 -- 4. Execute the tool calls and return results
 -- 5. Get the final assistant response
+-- Requires the lua-openai client: https://github.com/leafo/lua-openai
 --
 -- Usage:
 --   OPENAI_API_KEY=sk-... moon examples/tool_adapter_example.moon [model]
