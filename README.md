@@ -1,8 +1,8 @@
 # Lapis MCP
 
-A libray for developing MCP servers in Lua/MoonScript. Also contains a default
-MCP server for communicating with Lapis web applications.
-
+A libray for developing MCP servers or definining LLM tool calls in
+Lua/MoonScript. Also contains a default MCP server for communicating with Lapis
+web applications.
 
 ## Installation
 
@@ -460,9 +460,12 @@ errors. They still fail fast so the tool implementation can be fixed.
 
 ### Running Your Server
 
-You can run your MCP server in two ways: directly using `run_stdio()` or with a CLI interface using the `run_cli` class method.
+This library currently only supports stdio transport (but with plans to support more). There are two interfaces to starting the server:
 
-#### Direct Execution
+- `mcp_server:run_stdio()` - Instance method that immediately starts the server loop over stdin and writes to stdout. Input must follow the MCP protocol to be handled correctly.
+- `McpServer:run_cli()` - Class method that will instantiate your MCP server with argparse based configuration and debug tools, then immediately starts the stdio loop via `run_stdio`. In the future this will also support enabling other transport modes, so if you want general purpose CLI for starting your MCP server then I recommend this. Use the `--help` command to learn more about what's available.
+
+#### Programatic Execution
 
 ##### Lua
 
@@ -480,9 +483,9 @@ server = MyMcpServer({debug: true})
 server\run_stdio()
 ```
 
-#### CLI Interface with `run_cli`
+#### CLI Execution
 
-The `run_cli` class method provides a command-line interface with argument parsing for your MCP server:
+The `run_cli` class method that exposes the server of stdio transport with argument based configuration.
 
 ##### Lua
 
@@ -504,8 +507,7 @@ MyMcpServer\run_cli {
 
 #### CLI Options
 
-The `run_cli` method provides several useful command-line options:
-
+The `run_cli` method provides several useful command-line options. You can view these by passiing `--help` to your CLI program.
 
 - `--help` - Show all CLI options
 - `--debug` - Enable debug logging to stderr
@@ -514,7 +516,9 @@ The `run_cli` method provides several useful command-line options:
 - `--tool-argument <json>` / `--arg <json>` - Pass arguments to the tool (in JSON format)
 - `--send-message <message>` - Send a raw message and exit
 
-#### Examples
+#### CLI Examples
+
+When using `run_cli` in a script called `my_server.lua` the following are examples of argument usage:
 
 ```bash
 # Run server normally
