@@ -302,6 +302,159 @@ end)
   params.a / params.b
 ```
 
+### Using Tool Adapters with LLM APIs
+
+The `tool_adapter` modules let you take the tools defined on an `McpServer`
+class and expose them directly to LLM APIs. Each adapter does two jobs:
+
+- convert your MCP tool definitions into the provider's tool schema format
+- take the provider's tool call response shape, execute the matching MCP tools,
+  and build the provider-specific tool result messages to send back
+
+This means you can define your tools once on your MCP server and reuse that same
+tool collection both for MCP clients and for direct LLM API integrations.
+
+Available adapters:
+
+- `lapis.mcp.tool_adapter.openai`
+- `lapis.mcp.tool_adapter.anthropic`
+- `lapis.mcp.tool_adapter.gemini`
+
+#### OpenAI
+
+```moonscript
+import McpServer from require "lapis.mcp.server"
+OpenAIToolAdapter = require "lapis.mcp.tool_adapter.openai"
+
+class MathServer extends McpServer
+  @add_tool {
+    name: "add_numbers"
+    description: "Add two numbers"
+    inputSchema: {
+      type: "object"
+      properties: {
+        a: { type: "number" }
+        b: { type: "number" }
+      }
+      required: {"a", "b"}
+    }
+  }, (params) =>
+    params.a + params.b
+
+server = MathServer {}
+adapter = OpenAIToolAdapter server
+
+tools = adapter\to_tools!
+-- Use directly as the OpenAI `tools` parameter
+
+response = {
+  tool_calls: {
+    {
+      id: "call_123"
+      function: {
+        name: "add_numbers"
+        arguments: '{"a": 4, "b": 7}'
+      }
+    }
+  }
+}
+
+messages = adapter\process_tool_calls response
+-- Returns OpenAI `role: "tool"` messages ready to append back to the conversation
+```
+
+See [`examples/tool_adapter_example.moon`](https://github.com/leafo/lapis-mcp/blob/master/examples/tool_adapter_example.moon) for a complete OpenAI loop.
+
+#### Anthropic
+
+```moonscript
+AnthropicToolAdapter = require "lapis.mcp.tool_adapter.anthropic"
+
+server = MathServer {}
+adapter = AnthropicToolAdapter server
+
+tools = adapter\to_tools!
+-- Each MCP tool becomes an Anthropic tool definition with `input_schema`
+
+response = {
+  role: "assistant"
+  content: {
+    {
+      type: "tool_use"
+      id: "toolu_123"
+      name: "add_numbers"
+      input: {
+        a: 4
+        b: 7
+      }
+    }
+  }
+}
+
+messages = adapter\process_tool_calls response
+-- Returns a single Anthropic `role: "user"` message containing `tool_result` blocks
+```
+
+#### Gemini
+
+```moonscript
+GeminiToolAdapter = require "lapis.mcp.tool_adapter.gemini"
+
+server = MathServer {}
+adapter = GeminiToolAdapter server
+
+tools = adapter\to_tools!
+-- Use directly as the Gemini `tools` request field.
+-- The adapter wraps your MCP tools in `functionDeclarations`.
+
+response = {
+  candidates: {
+    {
+      content: {
+        role: "model"
+        parts: {
+          {
+            functionCall: {
+              name: "add_numbers"
+              args: {
+                a: 4
+                b: 7
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+contents = adapter\process_tool_calls response
+-- Returns Gemini request-ready contents:
+-- 1. the original model content with `functionCall`
+-- 2. a `role: "user"` message with `functionResponse` parts
+```
+
+#### What Gets Converted
+
+Each adapter reads the enabled tools from your MCP server and converts:
+
+- `name`
+- `description`
+- `inputSchema`
+
+into the provider's tool schema format.
+
+The tool handler implementation stays on the MCP server. When the model asks to
+call a tool, the adapter:
+
+1. extracts the provider-specific tool call payload
+2. calls `server:execute_tool(...)`
+3. serializes the result or returned `nil, err`
+4. builds the provider-specific tool result message shape
+
+Unexpected tool implementation exceptions are not turned into model-visible
+errors. They still fail fast so the tool implementation can be fixed.
+
 ### Running Your Server
 
 You can run your MCP server in two ways: directly using `run_stdio()` or with a CLI interface using the `run_cli` class method.
