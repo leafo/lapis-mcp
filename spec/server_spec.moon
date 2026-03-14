@@ -661,7 +661,7 @@ describe "McpServer", ->
           content: {
             {
               type: "text",
-              text: "Error executing tool: explicit error"
+              text: "explicit error"
             }
           },
           isError: true

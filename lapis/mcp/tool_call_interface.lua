@@ -1,38 +1,28 @@
-local json = require("cjson.safe")
+local json = require("cjson")
 local ToolCallInterface
 do
   local _class_0
   local _base_0 = {
-    get_available_tools = function(self)
-      local all_tools = self.server:get_all_tools()
-      local tools_array
-      do
-        local _accum_0 = { }
-        local _len_0 = 1
-        for name, tool in pairs(all_tools) do
-          _accum_0[_len_0] = tool
-          _len_0 = _len_0 + 1
-        end
-        tools_array = _accum_0
+    subclass_responsibility = function(self, method_name)
+      return error("subclass responsibility: implement " .. tostring(method_name))
+    end,
+    normalized_schema = function(self, tool)
+      local schema = {
+        type = tool.inputSchema.type or "object",
+        properties = tool.inputSchema.properties or { }
+      }
+      if type(tool.inputSchema.required) == "table" and #tool.inputSchema.required > 0 then
+        schema.required = tool.inputSchema.required
       end
-      local _accum_0 = { }
-      local _len_0 = 1
-      for _index_0 = 1, #tools_array do
-        local tool = tools_array[_index_0]
-        if not tool.hidden then
-          _accum_0[_len_0] = tool
-          _len_0 = _len_0 + 1
-        end
-      end
-      return _accum_0
+      return schema
     end,
     convert_tool = function(self, tool)
-      return error("convert_tool is not implemented, use a provider subclass")
+      return self:subclass_responsibility("convert_tool")
     end,
     to_tools = function(self)
       local _accum_0 = { }
       local _len_0 = 1
-      local _list_0 = self:get_available_tools()
+      local _list_0 = self.server:get_enabled_tools()
       for _index_0 = 1, #_list_0 do
         local tool = _list_0[_index_0]
         _accum_0[_len_0] = self:convert_tool(tool)
@@ -40,50 +30,72 @@ do
       end
       return _accum_0
     end,
-    execute_tool_call = function(self, tool_name, arguments)
-      if arguments == nil then
-        arguments = { }
-      end
-      local tool = self.server:find_tool(tool_name)
-      if not (tool) then
-        return false, "Tool not found: " .. tostring(tool_name)
-      end
-      if tool.inputSchema.required then
-        if type(tool.inputSchema.required) == "table" then
-          local _list_0 = tool.inputSchema.required
-          for _index_0 = 1, #_list_0 do
-            local param_name = _list_0[_index_0]
-            if not (arguments[param_name]) then
-              return false, "Missing required parameter: " .. tostring(param_name)
-            end
-          end
-        end
-      end
-      local ok, result, user_error = pcall(tool.handler, self.server, arguments)
-      if not (ok) then
-        return false, "Tool execution error: " .. tostring(result)
-      end
-      if user_error then
-        return false, user_error
-      end
-      return true, result
+    extract_tool_calls = function(self, message)
+      return self:subclass_responsibility("extract_tool_calls")
     end,
-    execute_tool_call_json = function(self, tool_name, arguments)
-      if arguments == nil then
-        arguments = { }
+    build_tool_result_message = function(self, tool_result)
+      return self:subclass_responsibility("build_tool_result_message")
+    end,
+    build_tool_result_messages = function(self, tool_results)
+      local _accum_0 = { }
+      local _len_0 = 1
+      for _index_0 = 1, #tool_results do
+        local tool_result = tool_results[_index_0]
+        _accum_0[_len_0] = self:build_tool_result_message(tool_result)
+        _len_0 = _len_0 + 1
       end
-      local success, result = self:execute_tool_call(tool_name, arguments)
-      if not (success) then
-        return false, result
-      end
+      return _accum_0
+    end,
+    serialize_result = function(self, result)
       if type(result) == "string" then
-        return true, result
+        return result
       end
-      local json_result, err = json.encode(result)
-      if not (json_result) then
-        return false, "Failed to encode result as JSON: " .. tostring(err)
+      return json.encode(result)
+    end,
+    serialize_error = function(self, err)
+      return json.encode({
+        error = tostring(err)
+      })
+    end,
+    execute_tool_call = function(self, tool_call)
+      if tool_call.error then
+        return {
+          tool_call = tool_call,
+          content = self:serialize_error(tool_call.error),
+          is_error = true
+        }
       end
-      return true, json_result
+      local result, err = self.server:execute_tool(tool_call.name, tool_call.arguments or { })
+      if err then
+        return {
+          tool_call = tool_call,
+          content = self:serialize_error(err),
+          is_error = true
+        }
+      end
+      return {
+        tool_call = tool_call,
+        content = self:serialize_result(result),
+        is_error = false
+      }
+    end,
+    process_tool_calls = function(self, message)
+      local tool_calls = self:extract_tool_calls(message)
+      if not (tool_calls) then
+        return { }
+      end
+      local tool_results
+      do
+        local _accum_0 = { }
+        local _len_0 = 1
+        for _index_0 = 1, #tool_calls do
+          local tool_call = tool_calls[_index_0]
+          _accum_0[_len_0] = self:execute_tool_call(tool_call)
+          _len_0 = _len_0 + 1
+        end
+        tool_results = _accum_0
+      end
+      return self:build_tool_result_messages(tool_results)
     end
   }
   _base_0.__index = _base_0

@@ -224,6 +224,29 @@ do
       end
       return nil
     end,
+    execute_tool = function(self, tool_name, arguments)
+      if arguments == nil then
+        arguments = { }
+      end
+      local tool = self:find_tool(tool_name)
+      if not (tool) then
+        return nil, "Unknown tool: " .. tostring(tool_name)
+      end
+      if type(tool.inputSchema.required) == "table" then
+        local _list_0 = tool.inputSchema.required
+        for _index_0 = 1, #_list_0 do
+          local param_name = _list_0[_index_0]
+          if arguments[param_name] == nil then
+            return nil, "Missing required parameter: " .. tostring(param_name)
+          end
+        end
+      end
+      local result, user_error = tool.handler(self, arguments)
+      if result == nil then
+        return nil, user_error or "Unknown error"
+      end
+      return result
+    end,
     find_resource = function(self, uri)
       local current_class = self.__class
       while current_class do
@@ -346,10 +369,10 @@ do
     end,
     handle_tools_call = with_initialized(function(self, message)
       local tool_name = message.params.name
-      local params = message.params.arguments or { }
       self:debug_log("info", "Executing tool: " .. tostring(tool_name))
-      local tool = self:find_tool(tool_name)
-      if not (tool) then
+      local result, err = self:execute_tool(tool_name, message.params.arguments or { })
+      if err then
+        self:debug_log("error", err)
         return {
           jsonrpc = "2.0",
           id = message.id,
@@ -357,61 +380,7 @@ do
             content = {
               {
                 type = "text",
-                text = "Unknown tool: " .. tostring(tool_name)
-              }
-            },
-            isError = true
-          }
-        }
-      end
-      if type(tool.inputSchema.required) == "table" then
-        local _list_0 = tool.inputSchema.required
-        for _index_0 = 1, #_list_0 do
-          local param_name = _list_0[_index_0]
-          if not params[param_name] then
-            return {
-              jsonrpc = "2.0",
-              id = message.id,
-              result = {
-                content = {
-                  {
-                    type = "text",
-                    text = "Missing required parameter: " .. tostring(param_name)
-                  }
-                },
-                isError = true
-              }
-            }
-          end
-        end
-      end
-      local ok, result_or_error, user_error = pcall(tool.handler, self, params)
-      if not ok then
-        self:debug_log("error", "Tool execution failed: " .. tostring(result_or_error))
-        return {
-          jsonrpc = "2.0",
-          id = message.id,
-          result = {
-            content = {
-              {
-                type = "text",
-                text = "Error executing tool: " .. tostring(result_or_error)
-              }
-            },
-            isError = true
-          }
-        }
-      end
-      if result_or_error == nil then
-        self:debug_log("warning", "Tool returned error: " .. tostring(user_error or "Unknown error"))
-        return {
-          jsonrpc = "2.0",
-          id = message.id,
-          result = {
-            content = {
-              {
-                type = "text",
-                text = "Error executing tool: " .. tostring(user_error or "Unknown error")
+                text = err
               }
             },
             isError = true
@@ -427,11 +396,11 @@ do
             {
               type = "text",
               text = (function()
-                local _exp_0 = type(result_or_error)
+                local _exp_0 = type(result)
                 if "string" == _exp_0 then
-                  return result_or_error
+                  return result
                 else
-                  return json.encode(result_or_error) or result_or_error
+                  return json.encode(result) or result
                 end
               end)()
             }
@@ -459,6 +428,40 @@ do
       end
       return all_tools
     end,
+    get_enabled_tools = function(self)
+      local tools
+      do
+        local _accum_0 = { }
+        local _len_0 = 1
+        for name, tool in pairs(self:get_all_tools()) do
+          local _continue_0 = false
+          repeat
+            local is_visible
+            if self.tool_visibility[tool.name] ~= nil then
+              is_visible = self.tool_visibility[tool.name]
+            else
+              is_visible = not tool.hidden
+            end
+            if not (is_visible) then
+              _continue_0 = true
+              break
+            end
+            local _value_0 = tool
+            _accum_0[_len_0] = _value_0
+            _len_0 = _len_0 + 1
+            _continue_0 = true
+          until true
+          if not _continue_0 then
+            break
+          end
+        end
+        tools = _accum_0
+      end
+      table.sort(tools, function(a, b)
+        return a.name < b.name
+      end)
+      return tools
+    end,
     get_all_resources = function(self)
       local all_resources = { }
       local current_class = self.__class
@@ -484,38 +487,19 @@ do
       do
         local _accum_0 = { }
         local _len_0 = 1
-        for name, tool in pairs(self:get_all_tools()) do
-          local _continue_0 = false
-          repeat
-            local is_visible
-            if self.tool_visibility[tool.name] ~= nil then
-              is_visible = self.tool_visibility[tool.name]
-            else
-              is_visible = not tool.hidden
-            end
-            if not (is_visible) then
-              _continue_0 = true
-              break
-            end
-            local _value_0 = {
-              name = tool.name,
-              description = tool.description,
-              inputSchema = tool.inputSchema,
-              annotations = tool.annotations
-            }
-            _accum_0[_len_0] = _value_0
-            _len_0 = _len_0 + 1
-            _continue_0 = true
-          until true
-          if not _continue_0 then
-            break
-          end
+        local _list_0 = self:get_enabled_tools()
+        for _index_0 = 1, #_list_0 do
+          local tool = _list_0[_index_0]
+          _accum_0[_len_0] = {
+            name = tool.name,
+            description = tool.description,
+            inputSchema = tool.inputSchema,
+            annotations = tool.annotations
+          }
+          _len_0 = _len_0 + 1
         end
         tools_list = _accum_0
       end
-      table.sort(tools_list, function(a, b)
-        return a.name < b.name
-      end)
       return {
         jsonrpc = "2.0",
         id = message.id,

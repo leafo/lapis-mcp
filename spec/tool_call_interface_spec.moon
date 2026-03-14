@@ -18,8 +18,8 @@ describe "ToolCallInterface", ->
       assert.has_error ->
         ToolCallInterface(nil)
 
-  describe "get_available_tools", ->
-    local server, tool_interface
+  describe "get_enabled_tools", ->
+    local server
 
     before_each ->
       class TestServer extends McpServer
@@ -55,10 +55,9 @@ describe "ToolCallInterface", ->
         }, -> "result2"
 
       server = TestServer!
-      tool_interface = ToolCallInterface(server)
 
     it "should return only visible tools", ->
-      tools = tool_interface\get_available_tools!
+      tools = server\get_enabled_tools!
       assert.is_table tools
       assert.equal 2, #tools
 
@@ -75,9 +74,8 @@ describe "ToolCallInterface", ->
     it "should handle server with no tools", ->
       class EmptyServer extends McpServer
       empty_server = EmptyServer!
-      empty_interface = ToolCallInterface(empty_server)
 
-      tools = empty_interface\get_available_tools!
+      tools = empty_server\get_enabled_tools!
       assert.is_table tools
       assert.equal 0, #tools
 
@@ -118,8 +116,22 @@ describe "ToolCallInterface", ->
       assert.has_error ->
         tool_interface\to_tools!
 
-  describe "execute_tool_call", ->
-    local server, tool_interface
+    it "should error when calling extract_tool_calls on base class", ->
+      class TestServer extends McpServer
+      tool_interface = ToolCallInterface(TestServer!)
+
+      assert.has_error ->
+        tool_interface\extract_tool_calls {}
+
+    it "should error when calling build_tool_result_message on base class", ->
+      class TestServer extends McpServer
+      tool_interface = ToolCallInterface(TestServer!)
+
+      assert.has_error ->
+        tool_interface\build_tool_result_message {}
+
+  describe "execute_tool", ->
+    local server
 
     before_each ->
       class TestServer extends McpServer
@@ -177,49 +189,28 @@ describe "ToolCallInterface", ->
           }
         }, -> nil, "This is an error message"
 
-        @add_tool {
-          name: "throw-error-tool"
-          description: "A tool that throws an error"
-          inputSchema: {
-            type: "object"
-            properties: {}
-            required: setmetatable {}, json.array_mt
-          }
-        }, -> error "Something went wrong"
-
       server = TestServer!
-      tool_interface = ToolCallInterface(server)
 
     describe "successful execution", ->
       it "should execute tool with all required parameters", ->
-        success, result = tool_interface\execute_tool_call("add-numbers", {a: 5, b: 3})
-
-        assert.is_true success
+        result = server\execute_tool "add-numbers", {a: 5, b: 3}
         assert.equal 8, result
 
       it "should execute tool with optional parameters provided", ->
-        success, result = tool_interface\execute_tool_call("greet", {name: "Alice", greeting: "Hi"})
-
-        assert.is_true success
+        result = server\execute_tool "greet", {name: "Alice", greeting: "Hi"}
         assert.equal "Hi, Alice!", result
 
       it "should execute tool with optional parameters omitted", ->
-        success, result = tool_interface\execute_tool_call("greet", {name: "Bob"})
-
-        assert.is_true success
+        result = server\execute_tool "greet", {name: "Bob"}
         assert.equal "Hello, Bob!", result
 
       it "should return string values correctly", ->
-        success, result = tool_interface\execute_tool_call("greet", {name: "Charlie"})
-
-        assert.is_true success
+        result = server\execute_tool "greet", {name: "Charlie"}
         assert.is_string result
         assert.equal "Hello, Charlie!", result
 
       it "should return table/object values correctly", ->
-        success, result = tool_interface\execute_tool_call("get-user-data", {user_id: "123"})
-
-        assert.is_true success
+        result = server\execute_tool "get-user-data", {user_id: "123"}
         assert.is_table result
         assert.same {
           id: "123"
@@ -228,51 +219,92 @@ describe "ToolCallInterface", ->
         }, result
 
       it "should return number values correctly", ->
-        success, result = tool_interface\execute_tool_call("add-numbers", {a: 10, b: 20})
-
-        assert.is_true success
+        result = server\execute_tool "add-numbers", {a: 10, b: 20}
         assert.equal 30, result
         assert.equal "number", type(result)
 
     describe "error handling", ->
       it "should return error when tool not found", ->
-        success, error = tool_interface\execute_tool_call("nonexistent-tool", {})
-
-        assert.is_false success
-        assert.is_string error
-        assert.is_true error\find("Tool not found") != nil
+        result, err = server\execute_tool "nonexistent-tool", {}
+        assert.is_nil result
+        assert.equal "Unknown tool: nonexistent-tool", err
 
       it "should return error when missing required parameter", ->
-        success, error = tool_interface\execute_tool_call("add-numbers", {a: 5})
-
-        assert.is_false success
-        assert.is_string error
-        assert.is_true error\find("Missing required parameter") != nil
+        result, err = server\execute_tool "add-numbers", {a: 5}
+        assert.is_nil result
+        assert.equal "Missing required parameter: b", err
 
       it "should return error when tool handler returns nil with error", ->
-        success, error = tool_interface\execute_tool_call("error-tool", {})
-
-        assert.is_false success
-        assert.equal "This is an error message", error
-
-      it "should catch and return error when tool handler throws", ->
-        success, error = tool_interface\execute_tool_call("throw-error-tool", {})
-
-        assert.is_false success
-        assert.is_string error
-        assert.is_true error\find("Tool execution error") != nil
+        result, err = server\execute_tool "error-tool", {}
+        assert.is_nil result
+        assert.equal "This is an error message", err
 
       it "should handle multiple missing required parameters", ->
-        success, error = tool_interface\execute_tool_call("add-numbers", {})
+        result, err = server\execute_tool "add-numbers", {}
+        assert.is_nil result
+        assert.is_string err
 
-        assert.is_false success
-        assert.is_string error
-
-  describe "execute_tool_call_json", ->
-    local server, tool_interface
+  describe "normalized_schema", ->
+    local tool_interface
 
     before_each ->
       class TestServer extends McpServer
+      tool_interface = ToolCallInterface(TestServer!)
+
+    it "should include required fields when present", ->
+      schema = tool_interface\normalized_schema {
+        inputSchema: {
+          type: "object"
+          properties: {
+            query: {
+              type: "string"
+            }
+          }
+          required: {"query"}
+        }
+      }
+
+      assert.same {
+        type: "object"
+        properties: {
+          query: {
+            type: "string"
+          }
+        }
+        required: {"query"}
+      }, schema
+
+    it "should omit empty required arrays", ->
+      schema = tool_interface\normalized_schema {
+        inputSchema: {
+          type: "object"
+          properties: {}
+          required: setmetatable {}, json.array_mt
+        }
+      }
+
+      assert.same {
+        type: "object"
+        properties: {}
+      }, schema
+
+  describe "shared tool execution", ->
+    local tool_interface
+
+    before_each ->
+      class TestServer extends McpServer
+        @add_tool {
+          name: "return-table"
+          description: "Returns a table"
+          inputSchema: {
+            type: "object"
+            properties: {}
+            required: setmetatable {}, json.array_mt
+          }
+        }, -> {
+          ok: true
+        }
+
         @add_tool {
           name: "return-string"
           description: "Returns a string"
@@ -281,72 +313,36 @@ describe "ToolCallInterface", ->
             properties: {}
             required: setmetatable {}, json.array_mt
           }
-        }, -> "simple string"
+        }, -> "plain text"
 
-        @add_tool {
-          name: "return-object"
-          description: "Returns an object"
-          inputSchema: {
-            type: "object"
-            properties: {}
-            required: setmetatable {}, json.array_mt
-          }
-        }, -> {
-          status: "success"
-          data: {
-            id: 123
-            name: "Test"
-          }
-        }
+      tool_interface = ToolCallInterface(TestServer!)
 
-        @add_tool {
-          name: "return-number"
-          description: "Returns a number"
-          inputSchema: {
-            type: "object"
-            properties: {}
-            required: setmetatable {}, json.array_mt
-          }
-        }, -> 42
+    it "should serialize string results as-is", ->
+      assert.equal "plain text", tool_interface\serialize_result("plain text")
 
-      server = TestServer!
-      tool_interface = ToolCallInterface(server)
+    it "should serialize table results as JSON", ->
+      tool_result = tool_interface\execute_tool_call {
+        name: "return-table"
+        arguments: {}
+      }
 
-    it "should return string results as-is", ->
-      success, result = tool_interface\execute_tool_call_json("return-string", {})
-
-      assert.is_true success
-      assert.is_string result
-      assert.equal "simple string", result
-
-    it "should encode table results as JSON", ->
-      success, json_result = tool_interface\execute_tool_call_json("return-object", {})
-
-      assert.is_true success
-      assert.is_string json_result
-
-      -- Parse back to verify it's valid JSON
-      parsed = json.decode(json_result)
+      assert.is_false tool_result.is_error
+      assert.is_string tool_result.content
+      parsed = json.decode tool_result.content
       assert.same {
-        status: "success"
-        data: {
-          id: 123
-          name: "Test"
-        }
+        ok: true
       }, parsed
 
-    it "should encode number results as JSON", ->
-      success, json_result = tool_interface\execute_tool_call_json("return-number", {})
+    it "should serialize tool execution errors as JSON", ->
+      tool_result = tool_interface\execute_tool_call {
+        name: "missing-tool"
+        arguments: {}
+      }
 
-      assert.is_true success
-      assert.is_string json_result
-      assert.equal "42", json_result
-
-    it "should propagate errors from execute_tool_call", ->
-      success, error = tool_interface\execute_tool_call_json("nonexistent", {})
-
-      assert.is_false success
-      assert.is_string error
+      assert.is_true tool_result.is_error
+      assert.same {
+        error: "Unknown tool: missing-tool"
+      }, json.decode(tool_result.content)
 
 describe "OpenAIToolCallInterface", ->
   local tool_interface
@@ -597,6 +593,86 @@ describe "OpenAIToolCallInterface", ->
       assert.is_table openai_tools[1].function
       assert.is_table openai_tools[2].function
 
+  describe "process_tool_calls", ->
+    before_each ->
+      class TestServer extends McpServer
+        @add_tool {
+          name: "echo-tool"
+          description: "Echoes a value"
+          inputSchema: {
+            type: "object"
+            properties: {
+              value: {
+                type: "string"
+              }
+            }
+            required: {"value"}
+          }
+        }, (params) => {
+          echoed: params.value
+        }
+
+      server = TestServer!
+      tool_interface = OpenAIToolCallInterface(server)
+
+    it "should execute tool calls and return OpenAI tool messages", ->
+      messages = tool_interface\process_tool_calls {
+        tool_calls: {
+          {
+            id: "call_123"
+            function: {
+              name: "echo-tool"
+              arguments: '{"value":"hello"}'
+            }
+          }
+        }
+      }
+
+      assert.same {
+        {
+          role: "tool"
+          tool_call_id: "call_123"
+          content: '{"echoed":"hello"}'
+        }
+      }, messages
+
+    it "should return JSON error content when execution fails", ->
+      messages = tool_interface\process_tool_calls {
+        tool_calls: {
+          {
+            id: "call_missing_tool"
+            function: {
+              name: "missing-tool"
+              arguments: "{}"
+            }
+          }
+        }
+      }
+
+      assert.same {
+        error: "Unknown tool: missing-tool"
+      }, json.decode(messages[1].content)
+
+    it "should return JSON error content when arguments are invalid JSON", ->
+      messages = tool_interface\process_tool_calls {
+        tool_calls: {
+          {
+            id: "call_bad_json"
+            function: {
+              name: "echo-tool"
+              arguments: '{"value":'
+            }
+          }
+        }
+      }
+
+      assert.equal 1, #messages
+      assert.equal "tool", messages[1].role
+      assert.equal "call_bad_json", messages[1].tool_call_id
+      parsed = json.decode messages[1].content
+      assert.is_string parsed.error
+      assert.truthy parsed.error\find "Failed to decode tool arguments as JSON"
+
 describe "AnthropicToolCallInterface", ->
   local tool_interface
 
@@ -781,8 +857,104 @@ describe "AnthropicToolCallInterface", ->
       assert.is_table tool_one.input_schema
       assert.is_table tool_two.input_schema
 
+  describe "process_tool_calls", ->
+    before_each ->
+      class TestServer extends McpServer
+        @add_tool {
+          name: "echo-tool"
+          description: "Echoes a value"
+          inputSchema: {
+            type: "object"
+            properties: {
+              value: {
+                type: "string"
+              }
+            }
+            required: {"value"}
+          }
+        }, (params) => {
+          echoed: params.value
+        }
+
+      server = TestServer!
+      tool_interface = AnthropicToolCallInterface(server)
+
+    it "should convert tool_use blocks into a single user tool_result message", ->
+      messages = tool_interface\process_tool_calls {
+        role: "assistant"
+        content: {
+          {
+            type: "text"
+            text: "Let me look that up."
+          }
+          {
+            type: "tool_use"
+            id: "toolu_123"
+            name: "echo-tool"
+            input: {
+              value: "hello"
+            }
+          }
+        }
+      }
+
+      assert.same {
+        {
+          role: "user"
+          content: {
+            {
+              type: "tool_result"
+              tool_use_id: "toolu_123"
+              content: '{"echoed":"hello"}'
+            }
+          }
+        }
+      }, messages
+
+    it "should include is_error for tool execution failures", ->
+      messages = tool_interface\process_tool_calls {
+        role: "assistant"
+        content: {
+          {
+            type: "tool_use"
+            id: "toolu_missing"
+            name: "missing-tool"
+            input: {}
+          }
+        }
+      }
+
+      assert.equal 1, #messages
+      assert.equal "user", messages[1].role
+      assert.same {
+        type: "tool_result"
+        tool_use_id: "toolu_missing"
+        content: '{"error":"Unknown tool: missing-tool"}'
+        is_error: true
+      }, messages[1].content[1]
+
+    it "should include is_error for malformed tool inputs", ->
+      messages = tool_interface\process_tool_calls {
+        role: "assistant"
+        content: {
+          {
+            type: "tool_use"
+            id: "toolu_bad_input"
+            name: "echo-tool"
+            input: "not-an-object"
+          }
+        }
+      }
+
+      assert.same {
+        type: "tool_result"
+        tool_use_id: "toolu_bad_input"
+        content: '{"error":"Expected tool_use input to be an object"}'
+        is_error: true
+      }, messages[1].content[1]
+
 describe "complex realistic scenarios", ->
-  local tool_interface_openai, tool_interface_anthropic
+  local server, tool_interface_openai, tool_interface_anthropic
 
   describe "database query tool", ->
     before_each ->
@@ -897,16 +1069,15 @@ describe "complex realistic scenarios", ->
       assert.same expected_tool, anthropic_tools[1]
 
     it "should execute with complex nested parameters", ->
-      success, result = tool_interface_openai\execute_tool_call("db-query", {
+      result = server\execute_tool "db-query", {
         table: "users"
         where: {
           status: "active"
           age: {gt: 18}
         }
         limit: 50
-      })
+      }
 
-      assert.is_true success
       assert.same {
         table: "users"
         conditions: {

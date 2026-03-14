@@ -245,6 +245,26 @@ class McpServer
       current_class = current_class.__parent
     nil
 
+  -- Execute a tool by name with the given arguments
+  -- Returns result on success, or nil and an error message on failure
+  execute_tool: (tool_name, arguments={}) =>
+    tool = @find_tool tool_name
+    unless tool
+      return nil, "Unknown tool: #{tool_name}"
+
+    -- Validate required parameters
+    if type(tool.inputSchema.required) == "table"
+      for param_name in *tool.inputSchema.required
+        if arguments[param_name] == nil
+          return nil, "Missing required parameter: #{param_name}"
+
+    result, user_error = tool.handler @, arguments
+
+    if result == nil
+      return nil, user_error or "Unknown error"
+
+    result
+
   find_resource: (uri) =>
     -- Search up the inheritance chain for the resource
     current_class = @.__class
@@ -365,13 +385,13 @@ class McpServer
 
   handle_tools_call: with_initialized (message) =>
     tool_name = message.params.name
-    params = message.params.arguments or {}
 
     @debug_log "info", "Executing tool: #{tool_name}"
 
-    tool = @find_tool tool_name
+    result, err = @execute_tool tool_name, message.params.arguments or {}
 
-    unless tool
+    if err
+      @debug_log "error", err
       return {
         jsonrpc: "2.0"
         id: message.id
@@ -379,62 +399,7 @@ class McpServer
           content: {
             {
               type: "text"
-              text: "Unknown tool: #{tool_name}"
-            }
-          }
-          isError: true
-        }
-      }
-
-    -- Validate required parameters
-    -- it might not be a table if it's json.empty_array
-    if type(tool.inputSchema.required) == "table"
-      for param_name in *tool.inputSchema.required
-        if not params[param_name]
-          return {
-            jsonrpc: "2.0"
-            id: message.id
-            result: {
-              content: {
-                {
-                  type: "text"
-                  text: "Missing required parameter: #{param_name}"
-                }
-              }
-              isError: true
-            }
-          }
-
-    -- Call the tool handler
-    ok, result_or_error, user_error = pcall(tool.handler, @, params)
-
-    if not ok
-      @debug_log "error", "Tool execution failed: #{result_or_error}"
-      return {
-        jsonrpc: "2.0"
-        id: message.id
-        result: {
-          content: {
-            {
-              type: "text"
-              text: "Error executing tool: #{result_or_error}"
-            }
-          }
-          isError: true
-        }
-      }
-
-    -- wrap nil, err into object
-    if result_or_error == nil
-      @debug_log "warning", "Tool returned error: #{user_error or "Unknown error"}"
-      return {
-        jsonrpc: "2.0"
-        id: message.id
-        result: {
-          content: {
-            {
-              type: "text"
-              text: "Error executing tool: #{user_error or "Unknown error"}"
+              text: err
             }
           }
           isError: true
@@ -450,11 +415,11 @@ class McpServer
         content: {
           {
             type: "text"
-            text: switch type result_or_error
+            text: switch type result
               when "string"
-                result_or_error
+                result
               else
-                json.encode(result_or_error) or result_or_error
+                json.encode(result) or result
           }
         }
         isError: false
@@ -474,6 +439,20 @@ class McpServer
       current_class = current_class.__parent
     all_tools
 
+  -- Get enabled (visible) tools as an array, respecting tool_visibility and hidden
+  get_enabled_tools: =>
+    tools = for name, tool in pairs @get_all_tools!
+      is_visible = if @tool_visibility[tool.name] != nil
+        @tool_visibility[tool.name]
+      else
+        not tool.hidden
+
+      continue unless is_visible
+      tool
+
+    table.sort tools, (a, b) -> a.name < b.name
+    tools
+
   -- Get all resources from the inheritance chain
   get_all_resources: =>
     all_resources = {}
@@ -491,22 +470,13 @@ class McpServer
 
   -- Get tools list response (for API and testing)
   handle_tools_list: with_initialized (message) =>
-    tools_list = for name, tool in pairs @get_all_tools!
-      -- Check instance visibility override first, then tool default
-      is_visible = if @tool_visibility[tool.name] != nil
-        @tool_visibility[tool.name]
-      else
-        not tool.hidden
-
-      continue unless is_visible
+    tools_list = for tool in *@get_enabled_tools!
       {
         name: tool.name
         description: tool.description
         inputSchema: tool.inputSchema
         annotations: tool.annotations
       }
-
-    table.sort tools_list, (a, b) -> a.name < b.name
 
     {
       jsonrpc: "2.0"

@@ -1,24 +1,27 @@
--- Example: Using ToolCallInterface to bridge MCP servers with LLM APIs
+-- Example: End-to-end OpenAI integration using MCP tools via lua-openai
 --
--- This example demonstrates how to:
--- 1. Create an MCP server with tools
--- 2. Use provider-specific subclasses for format conversion
--- 3. Convert tools to OpenAI and Anthropic formats via to_tools()
--- 4. Execute tool calls from LLM responses
+-- This example demonstrates a complete tool-calling loop:
+-- 1. Define MCP tools on a server
+-- 2. Convert them to OpenAI format via OpenAIToolCallInterface
+-- 3. Send a prompt to OpenAI that triggers tool calls
+-- 4. Execute the tool calls and return results
+-- 5. Get the final assistant response
+--
+-- Usage:
+--   OPENAI_API_KEY=sk-... moon examples/tool_call_interface_example.moon [model]
 
 import McpServer from require "lapis.mcp.server"
 import OpenAIToolCallInterface from require "lapis.mcp.tool_call_interface.openai"
-import AnthropicToolCallInterface from require "lapis.mcp.tool_call_interface.anthropic"
-json = require "cjson.safe"
+openai = require "openai"
 
 -- Create a simple MCP server with some example tools
 class ExampleMcpServer extends McpServer
   @server_name: "example-server"
-  @instructions: [[Example server for demonstrating ToolCallInterface]]
+  @instructions: [[Example server for demonstrating OpenAI tool calling]]
 
   @add_tool {
     name: "add_numbers"
-    description: "Adds two numbers together"
+    description: "Adds two numbers together and returns the sum"
     inputSchema: {
       type: "object"
       properties: {
@@ -38,7 +41,7 @@ class ExampleMcpServer extends McpServer
 
   @add_tool {
     name: "greet_user"
-    description: "Generates a greeting message for a user"
+    description: "Generates a greeting message for a user in the specified language"
     inputSchema: {
       type: "object"
       properties: {
@@ -64,87 +67,57 @@ class ExampleMcpServer extends McpServer
     greeting = greetings[language] or greetings.en
     "#{greeting}, #{params.name}!"
 
--- Initialize the MCP server
-server = ExampleMcpServer {}
+-- Determine which model to use
+model = arg[1] or os.getenv("OPENAI_TEST_MODEL") or "gpt-4.1"
 
--- Create provider-specific interfaces
-openai_interface = OpenAIToolCallInterface(server)
-anthropic_interface = AnthropicToolCallInterface(server)
+-- Verify API key is set
+api_key = os.getenv "OPENAI_API_KEY"
+unless api_key
+  print "Error: OPENAI_API_KEY environment variable is required"
+  os.exit 1
 
-print "=== Example: ToolCallInterface Usage ==="
+-- Initialize components
+interface = OpenAIToolCallInterface ExampleMcpServer {}
+client = openai.new api_key
+
+-- Create a chat session with MCP tools converted to OpenAI format
+chat = client\new_chat_session {
+  :model
+  tools: interface\to_tools!
+  tool_choice: "auto"
+}
+
+print "=== OpenAI Tool Calling with MCP ==="
+print "Model: #{model}"
 print ""
 
--- 1. Convert to OpenAI format
-print "1. OpenAI Tool Format:"
-print "----------------------"
-openai_tools = openai_interface\to_tools!
-print json.encode(openai_tools)
+prompt = "What is 15 + 27? Then greet Alice in Spanish."
+print "User: #{prompt}"
 print ""
 
--- 2. Convert to Anthropic format
-print "2. Anthropic Tool Format:"
-print "-------------------------"
-anthropic_tools = anthropic_interface\to_tools!
-print json.encode(anthropic_tools)
+-- Send initial message
+response, err = chat\send prompt
+
+unless response
+  print "Error: #{err}"
+  os.exit 1
+
+-- Tool-calling loop: process tool calls until we get a text response
+while type(response) == "table" and response.tool_calls
+  for msg in *interface\process_tool_calls response
+    print "Tool call: #{msg.tool_call_id}"
+    print "Result: #{msg.content}"
+    print ""
+    chat\append_message msg
+
+  -- Get next response after all tool results are sent
+  response, err = chat\generate_response!
+
+  unless response
+    print "Error: #{err}"
+    os.exit 1
+
+-- Print final text response
+print "Assistant: #{response}"
 print ""
-
--- 3. Simulate executing a tool call from OpenAI response
-print "3. Executing Tool Calls:"
-print "------------------------"
-
--- Example: OpenAI returns this in the function_call
-print "Calling add_numbers with {a: 5, b: 3}..."
-success, result = openai_interface\execute_tool_call("add_numbers", {a: 5, b: 3})
-if success
-  print "Result: #{result}"
-else
-  print "Error: #{result}"
-print ""
-
--- Example: Anthropic returns this in tool_use
-print "Calling greet_user with {name: 'Alice', language: 'es'}..."
-success, result = anthropic_interface\execute_tool_call("greet_user", {name: "Alice", language: "es"})
-if success
-  print "Result: #{result}"
-else
-  print "Error: #{result}"
-print ""
-
--- 4. Execute with JSON formatting
-print "4. Execute with JSON Result:"
-print "----------------------------"
-success, json_result = openai_interface\execute_tool_call_json("add_numbers", {a: 10, b: 20})
-if success
-  print "JSON Result: #{json_result}"
-else
-  print "Error: #{json_result}"
-print ""
-
--- 5. Error handling example
-print "5. Error Handling:"
-print "------------------"
-print "Calling add_numbers with missing required parameter 'b'..."
-success, error_msg = openai_interface\execute_tool_call("add_numbers", {a: 5})
-if success
-  print "Result: #{error_msg}"
-else
-  print "Error: #{error_msg}"
-print ""
-
-print "=== Example Complete ==="
-
--- Usage in a real LLM API workflow:
---
--- Step 1: Get tools in the format your LLM API expects
---   openai_tools = openai_interface\to_tools!
---   anthropic_tools = anthropic_interface\to_tools!
---
--- Step 2: Send tools to LLM API in your request
---
--- Step 3: When LLM responds with a tool call, extract the tool name and arguments
---
--- Step 4: Execute the tool
---   success, result = openai_interface\execute_tool_call(tool_name, arguments)
---
--- Step 5: Send result back to LLM API for the next turn
---   (Implementation depends on your specific LLM API client)
+print "=== Done ==="
