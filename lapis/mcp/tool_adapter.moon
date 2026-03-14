@@ -1,16 +1,16 @@
 json = require "cjson"
 
--- ToolCallInterface: Bridge between MCP servers and LLM API tool definitions
+-- ToolAdapter: Bridge between MCP servers and LLM API tool definitions
 -- Base class providing shared logic for tool discovery and execution.
 -- Subclass and implement convert_tool() for provider-specific format conversion.
 
-class ToolCallInterface
+class ToolAdapter
   subclass_responsibility: (method_name) =>
     error "subclass responsibility: implement #{method_name}"
 
   new: (mcp_server) =>
     unless mcp_server
-      error "ToolCallInterface requires an MCP server instance"
+      error "ToolAdapter requires an MCP server instance"
     @server = mcp_server
 
   -- Normalize an MCP tool schema for provider-specific wrappers
@@ -87,7 +87,3 @@ class ToolCallInterface
 
     tool_results = [@execute_tool_call(tool_call) for tool_call in *tool_calls]
     @build_tool_result_messages tool_results
-
-{
-  :ToolCallInterface
-}

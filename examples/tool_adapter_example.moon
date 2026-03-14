@@ -2,16 +2,16 @@
 --
 -- This example demonstrates a complete tool-calling loop:
 -- 1. Define MCP tools on a server
--- 2. Convert them to OpenAI format via OpenAIToolCallInterface
+-- 2. Convert them to OpenAI format via OpenAIToolAdapter
 -- 3. Send a prompt to OpenAI that triggers tool calls
 -- 4. Execute the tool calls and return results
 -- 5. Get the final assistant response
 --
 -- Usage:
---   OPENAI_API_KEY=sk-... moon examples/tool_call_interface_example.moon [model]
+--   OPENAI_API_KEY=sk-... moon examples/tool_adapter_example.moon [model]
 
 import McpServer from require "lapis.mcp.server"
-import OpenAIToolCallInterface from require "lapis.mcp.tool_call_interface.openai"
+OpenAIToolAdapter = require "lapis.mcp.tool_adapter.openai"
 openai = require "openai"
 
 -- Create a simple MCP server with some example tools
@@ -77,7 +77,7 @@ unless api_key
   os.exit 1
 
 -- Initialize components
-interface = OpenAIToolCallInterface ExampleMcpServer {}
+interface = OpenAIToolAdapter ExampleMcpServer {}
 client = openai.new api_key
 
 -- Create a chat session with MCP tools converted to OpenAI format

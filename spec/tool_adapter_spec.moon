@@ -1,22 +1,22 @@
 import McpServer from require "lapis.mcp.server"
-import ToolCallInterface from require "lapis.mcp.tool_call_interface"
-import OpenAIToolCallInterface from require "lapis.mcp.tool_call_interface.openai"
-import AnthropicToolCallInterface from require "lapis.mcp.tool_call_interface.anthropic"
+ToolAdapter = require "lapis.mcp.tool_adapter"
+OpenAIToolAdapter = require "lapis.mcp.tool_adapter.openai"
+AnthropicToolAdapter = require "lapis.mcp.tool_adapter.anthropic"
 json = require "cjson.safe"
 
-describe "ToolCallInterface", ->
+describe "ToolAdapter", ->
   describe "initialization", ->
     it "should create interface with valid MCP server", ->
       class TestServer extends McpServer
       server = TestServer!
-      tool_interface = ToolCallInterface(server)
+      tool_interface = ToolAdapter(server)
 
       assert.is_not_nil tool_interface
       assert.equal server, tool_interface.server
 
     it "should error when creating without server", ->
       assert.has_error ->
-        ToolCallInterface(nil)
+        ToolAdapter(nil)
 
   describe "get_enabled_tools", ->
     local server
@@ -93,7 +93,7 @@ describe "ToolCallInterface", ->
         }, -> "result"
 
       server = TestServer!
-      tool_interface = ToolCallInterface(server)
+      tool_interface = ToolAdapter(server)
 
       assert.has_error ->
         tool_interface\convert_tool({name: "test"})
@@ -111,21 +111,21 @@ describe "ToolCallInterface", ->
         }, -> "result"
 
       server = TestServer!
-      tool_interface = ToolCallInterface(server)
+      tool_interface = ToolAdapter(server)
 
       assert.has_error ->
         tool_interface\to_tools!
 
     it "should error when calling extract_tool_calls on base class", ->
       class TestServer extends McpServer
-      tool_interface = ToolCallInterface(TestServer!)
+      tool_interface = ToolAdapter(TestServer!)
 
       assert.has_error ->
         tool_interface\extract_tool_calls {}
 
     it "should error when calling build_tool_result_message on base class", ->
       class TestServer extends McpServer
-      tool_interface = ToolCallInterface(TestServer!)
+      tool_interface = ToolAdapter(TestServer!)
 
       assert.has_error ->
         tool_interface\build_tool_result_message {}
@@ -249,7 +249,7 @@ describe "ToolCallInterface", ->
 
     before_each ->
       class TestServer extends McpServer
-      tool_interface = ToolCallInterface(TestServer!)
+      tool_interface = ToolAdapter(TestServer!)
 
     it "should include required fields when present", ->
       schema = tool_interface\normalized_schema {
@@ -315,7 +315,7 @@ describe "ToolCallInterface", ->
           }
         }, -> "plain text"
 
-      tool_interface = ToolCallInterface(TestServer!)
+      tool_interface = ToolAdapter(TestServer!)
 
     it "should serialize string results as-is", ->
       assert.equal "plain text", tool_interface\serialize_result("plain text")
@@ -344,7 +344,7 @@ describe "ToolCallInterface", ->
         error: "Unknown tool: missing-tool"
       }, json.decode(tool_result.content)
 
-describe "OpenAIToolCallInterface", ->
+describe "OpenAIToolAdapter", ->
   local tool_interface
 
   describe "with no parameters", ->
@@ -361,7 +361,7 @@ describe "OpenAIToolCallInterface", ->
         }, -> "result"
 
       server = TestServer!
-      tool_interface = OpenAIToolCallInterface(server)
+      tool_interface = OpenAIToolAdapter(server)
 
     it "should convert to OpenAI format with empty properties", ->
       openai_tools = tool_interface\to_tools!
@@ -405,7 +405,7 @@ describe "OpenAIToolCallInterface", ->
         }, -> "result"
 
       server = TestServer!
-      tool_interface = OpenAIToolCallInterface(server)
+      tool_interface = OpenAIToolAdapter(server)
 
     it "should include required array in parameters", ->
       openai_tools = tool_interface\to_tools!
@@ -460,7 +460,7 @@ describe "OpenAIToolCallInterface", ->
         }, -> "result"
 
       server = TestServer!
-      tool_interface = OpenAIToolCallInterface(server)
+      tool_interface = OpenAIToolAdapter(server)
 
     it "should include only required fields in required array", ->
       openai_tools = tool_interface\to_tools!
@@ -519,7 +519,7 @@ describe "OpenAIToolCallInterface", ->
         }, -> "result"
 
       server = TestServer!
-      tool_interface = OpenAIToolCallInterface(server)
+      tool_interface = OpenAIToolAdapter(server)
 
     it "should preserve all parameter types", ->
       openai_tools = tool_interface\to_tools!
@@ -582,7 +582,7 @@ describe "OpenAIToolCallInterface", ->
         }, -> "result2"
 
       server = TestServer!
-      tool_interface = OpenAIToolCallInterface(server)
+      tool_interface = OpenAIToolAdapter(server)
 
     it "should convert all visible tools", ->
       openai_tools = tool_interface\to_tools!
@@ -613,7 +613,7 @@ describe "OpenAIToolCallInterface", ->
         }
 
       server = TestServer!
-      tool_interface = OpenAIToolCallInterface(server)
+      tool_interface = OpenAIToolAdapter(server)
 
     it "should execute tool calls and return OpenAI tool messages", ->
       messages = tool_interface\process_tool_calls {
@@ -673,7 +673,7 @@ describe "OpenAIToolCallInterface", ->
       assert.is_string parsed.error
       assert.truthy parsed.error\find "Failed to decode tool arguments as JSON"
 
-describe "AnthropicToolCallInterface", ->
+describe "AnthropicToolAdapter", ->
   local tool_interface
 
   describe "with no parameters", ->
@@ -690,7 +690,7 @@ describe "AnthropicToolCallInterface", ->
         }, -> "result"
 
       server = TestServer!
-      tool_interface = AnthropicToolCallInterface(server)
+      tool_interface = AnthropicToolAdapter(server)
 
     it "should convert to Anthropic format with empty properties", ->
       anthropic_tools = tool_interface\to_tools!
@@ -731,7 +731,7 @@ describe "AnthropicToolCallInterface", ->
         }, -> "result"
 
       server = TestServer!
-      tool_interface = AnthropicToolCallInterface(server)
+      tool_interface = AnthropicToolAdapter(server)
 
     it "should include required array in input_schema", ->
       anthropic_tools = tool_interface\to_tools!
@@ -781,7 +781,7 @@ describe "AnthropicToolCallInterface", ->
         }, -> "result"
 
       server = TestServer!
-      tool_interface = AnthropicToolCallInterface(server)
+      tool_interface = AnthropicToolAdapter(server)
 
     it "should preserve parameter structure with defaults", ->
       anthropic_tools = tool_interface\to_tools!
@@ -836,7 +836,7 @@ describe "AnthropicToolCallInterface", ->
         }, -> "result2"
 
       server = TestServer!
-      tool_interface = AnthropicToolCallInterface(server)
+      tool_interface = AnthropicToolAdapter(server)
 
     it "should convert all visible tools to Anthropic format", ->
       anthropic_tools = tool_interface\to_tools!
@@ -877,7 +877,7 @@ describe "AnthropicToolCallInterface", ->
         }
 
       server = TestServer!
-      tool_interface = AnthropicToolCallInterface(server)
+      tool_interface = AnthropicToolAdapter(server)
 
     it "should convert tool_use blocks into a single user tool_result message", ->
       messages = tool_interface\process_tool_calls {
@@ -994,8 +994,8 @@ describe "complex realistic scenarios", ->
         }
 
       server = TestServer!
-      tool_interface_openai = OpenAIToolCallInterface(server)
-      tool_interface_anthropic = AnthropicToolCallInterface(server)
+      tool_interface_openai = OpenAIToolAdapter(server)
+      tool_interface_anthropic = AnthropicToolAdapter(server)
 
     it "should convert complex tool to OpenAI format", ->
       openai_tools = tool_interface_openai\to_tools!

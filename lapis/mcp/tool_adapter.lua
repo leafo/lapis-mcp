@@ -1,5 +1,5 @@
 local json = require("cjson")
-local ToolCallInterface
+local ToolAdapter
 do
   local _class_0
   local _base_0 = {
@@ -102,12 +102,12 @@ do
   _class_0 = setmetatable({
     __init = function(self, mcp_server)
       if not (mcp_server) then
-        error("ToolCallInterface requires an MCP server instance")
+        error("ToolAdapter requires an MCP server instance")
       end
       self.server = mcp_server
     end,
     __base = _base_0,
-    __name = "ToolCallInterface"
+    __name = "ToolAdapter"
   }, {
     __index = _base_0,
     __call = function(cls, ...)
@@ -117,8 +117,6 @@ do
     end
   })
   _base_0.__class = _class_0
-  ToolCallInterface = _class_0
+  ToolAdapter = _class_0
+  return _class_0
 end
-return {
-  ToolCallInterface = ToolCallInterface
-}

@@ -1,9 +1,9 @@
-import ToolCallInterface from require "lapis.mcp.tool_call_interface"
+ToolAdapter = require "lapis.mcp.tool_adapter"
 
 -- Anthropic-specific tool format conversion
 -- Reference: https://docs.anthropic.com/claude/docs/tool-use
 
-class AnthropicToolCallInterface extends ToolCallInterface
+class AnthropicToolAdapter extends ToolAdapter
   convert_tool: (tool) =>
     {
       name: tool.name
@@ -33,7 +33,7 @@ class AnthropicToolCallInterface extends ToolCallInterface
     tool_calls
 
   build_tool_result_message: =>
-    error "AnthropicToolCallInterface does not support individual tool result messages, use build_tool_result_messages instead"
+    error "AnthropicToolAdapter does not support individual tool result messages, use build_tool_result_messages instead"
 
   -- Anthropic expects tool results to be grouped into a single user message
   build_tool_result_messages: (tool_results) =>
@@ -56,7 +56,3 @@ class AnthropicToolCallInterface extends ToolCallInterface
         :content
       }
     }
-
-{
-  :AnthropicToolCallInterface
-}

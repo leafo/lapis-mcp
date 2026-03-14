@@ -1,9 +1,8 @@
-local ToolCallInterface
-ToolCallInterface = require("lapis.mcp.tool_call_interface").ToolCallInterface
-local AnthropicToolCallInterface
+local ToolAdapter = require("lapis.mcp.tool_adapter")
+local AnthropicToolAdapter
 do
   local _class_0
-  local _parent_0 = ToolCallInterface
+  local _parent_0 = ToolAdapter
   local _base_0 = {
     convert_tool = function(self, tool)
       return {
@@ -51,7 +50,7 @@ do
       return tool_calls
     end,
     build_tool_result_message = function(self)
-      return error("AnthropicToolCallInterface does not support individual tool result messages, use build_tool_result_messages instead")
+      return error("AnthropicToolAdapter does not support individual tool result messages, use build_tool_result_messages instead")
     end,
     build_tool_result_messages = function(self, tool_results)
       if not (#tool_results > 0) then
@@ -85,7 +84,7 @@ do
       return _class_0.__parent.__init(self, ...)
     end,
     __base = _base_0,
-    __name = "AnthropicToolCallInterface",
+    __name = "AnthropicToolAdapter",
     __parent = _parent_0
   }, {
     __index = function(cls, name)
@@ -109,8 +108,6 @@ do
   if _parent_0.__inherited then
     _parent_0.__inherited(_parent_0, _class_0)
   end
-  AnthropicToolCallInterface = _class_0
+  AnthropicToolAdapter = _class_0
+  return _class_0
 end
-return {
-  AnthropicToolCallInterface = AnthropicToolCallInterface
-}

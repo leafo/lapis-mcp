@@ -1,10 +1,9 @@
-local ToolCallInterface
-ToolCallInterface = require("lapis.mcp.tool_call_interface").ToolCallInterface
+local ToolAdapter = require("lapis.mcp.tool_adapter")
 local json = require("cjson.safe")
-local OpenAIToolCallInterface
+local OpenAIToolAdapter
 do
   local _class_0
-  local _parent_0 = ToolCallInterface
+  local _parent_0 = ToolAdapter
   local _base_0 = {
     convert_tool = function(self, tool)
       return {
@@ -61,7 +60,7 @@ do
       return _class_0.__parent.__init(self, ...)
     end,
     __base = _base_0,
-    __name = "OpenAIToolCallInterface",
+    __name = "OpenAIToolAdapter",
     __parent = _parent_0
   }, {
     __index = function(cls, name)
@@ -85,8 +84,6 @@ do
   if _parent_0.__inherited then
     _parent_0.__inherited(_parent_0, _class_0)
   end
-  OpenAIToolCallInterface = _class_0
+  OpenAIToolAdapter = _class_0
+  return _class_0
 end
-return {
-  OpenAIToolCallInterface = OpenAIToolCallInterface
-}

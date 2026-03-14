@@ -1,10 +1,10 @@
-import ToolCallInterface from require "lapis.mcp.tool_call_interface"
+ToolAdapter = require "lapis.mcp.tool_adapter"
 json = require "cjson.safe"
 
 -- OpenAI-specific tool format conversion and execution
 -- Reference: https://platform.openai.com/docs/guides/function-calling
 
-class OpenAIToolCallInterface extends ToolCallInterface
+class OpenAIToolAdapter extends ToolAdapter
   convert_tool: (tool) =>
     {
       type: "function"
@@ -46,7 +46,3 @@ class OpenAIToolCallInterface extends ToolCallInterface
       tool_call_id: tool_result.tool_call.id
       content: tool_result.content
     }
-
-{
-  :OpenAIToolCallInterface
-}
