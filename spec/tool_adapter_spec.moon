@@ -2,6 +2,7 @@ import McpServer from require "lapis.mcp.server"
 ToolAdapter = require "lapis.mcp.tool_adapter"
 OpenAIToolAdapter = require "lapis.mcp.tool_adapter.openai"
 AnthropicToolAdapter = require "lapis.mcp.tool_adapter.anthropic"
+GeminiToolAdapter = require "lapis.mcp.tool_adapter.gemini"
 json = require "cjson.safe"
 
 describe "ToolAdapter", ->
@@ -953,8 +954,204 @@ describe "AnthropicToolAdapter", ->
         is_error: true
       }, messages[1].content[1]
 
+describe "GeminiToolAdapter", ->
+  local tool_interface
+
+  describe "to_tools", ->
+    before_each ->
+      class TestServer extends McpServer
+        @add_tool {
+          name: "search-docs"
+          description: "Searches the document index"
+          inputSchema: {
+            type: "object"
+            properties: {
+              query: {
+                type: "string"
+                description: "Search query"
+              }
+              filters: {
+                type: "object"
+                properties: {
+                  tags: {
+                    type: "array"
+                    items: {
+                      type: "string"
+                    }
+                  }
+                  limit: {
+                    type: "integer"
+                    minimum: 1
+                  }
+                }
+                required: {"tags"}
+              }
+            }
+            required: {"query"}
+          }
+        }, -> "result"
+
+      server = TestServer!
+      tool_interface = GeminiToolAdapter(server)
+
+    it "should convert tools to Gemini functionDeclarations format", ->
+      gemini_tools = tool_interface\to_tools!
+
+      assert.same {
+        {
+          functionDeclarations: {
+            {
+              name: "search-docs"
+              description: "Searches the document index"
+              parameters: {
+                type: "OBJECT"
+                properties: {
+                  query: {
+                    type: "STRING"
+                    description: "Search query"
+                  }
+                  filters: {
+                    type: "OBJECT"
+                    properties: {
+                      tags: {
+                        type: "ARRAY"
+                        items: {
+                          type: "STRING"
+                        }
+                      }
+                      limit: {
+                        type: "INTEGER"
+                        minimum: 1
+                      }
+                    }
+                    required: {"tags"}
+                  }
+                }
+                required: {"query"}
+              }
+            }
+          }
+        }
+      }, gemini_tools
+
+  describe "process_tool_calls", ->
+    before_each ->
+      class TestServer extends McpServer
+        @add_tool {
+          name: "echo-tool"
+          description: "Echoes a value"
+          inputSchema: {
+            type: "object"
+            properties: {
+              value: {
+                type: "string"
+              }
+            }
+            required: {"value"}
+          }
+        }, (params) => {
+          echoed: params.value
+        }
+
+      server = TestServer!
+      tool_interface = GeminiToolAdapter(server)
+
+    it "should return model content plus user functionResponse parts", ->
+      messages = tool_interface\process_tool_calls {
+        candidates: {
+          {
+            content: {
+              role: "model"
+              parts: {
+                {
+                  functionCall: {
+                    name: "echo-tool"
+                    args: {
+                      value: "hello"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
+      assert.same {
+        {
+          role: "model"
+          parts: {
+            {
+              functionCall: {
+                name: "echo-tool"
+                args: {
+                  value: "hello"
+                }
+              }
+            }
+          }
+        }
+        {
+          role: "user"
+          parts: {
+            {
+              functionResponse: {
+                name: "echo-tool"
+                response: {
+                  result: {
+                    echoed: "hello"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }, messages
+
+    it "should convert unknown tools into functionResponse errors", ->
+      messages = tool_interface\process_tool_calls {
+        candidates: {
+          {
+            content: {
+              role: "model"
+              parts: {
+                {
+                  functionCall: {
+                    name: "missing-tool"
+                    args: {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
+      assert.same "Unknown tool: missing-tool", messages[2].parts[1].functionResponse.response.error
+
+    it "should return an error when functionCall args are not objects", ->
+      messages = tool_interface\process_tool_calls {
+        candidates: {
+          {
+            content: {
+              role: "model"
+              parts: {
+                {
+                  functionCall: {
+                    name: "echo-tool"
+                    args: "bad-args"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
+      assert.same "Expected functionCall args to be an object", messages[2].parts[1].functionResponse.response.error
+
 describe "complex realistic scenarios", ->
-  local server, tool_interface_openai, tool_interface_anthropic
+  local server, tool_interface_openai, tool_interface_anthropic, tool_interface_gemini
 
   describe "database query tool", ->
     before_each ->
@@ -996,6 +1193,7 @@ describe "complex realistic scenarios", ->
       server = TestServer!
       tool_interface_openai = OpenAIToolAdapter(server)
       tool_interface_anthropic = AnthropicToolAdapter(server)
+      tool_interface_gemini = GeminiToolAdapter(server)
 
     it "should convert complex tool to OpenAI format", ->
       openai_tools = tool_interface_openai\to_tools!
@@ -1067,6 +1265,46 @@ describe "complex realistic scenarios", ->
       }
 
       assert.same expected_tool, anthropic_tools[1]
+
+    it "should convert complex tool to Gemini format", ->
+      gemini_tools = tool_interface_gemini\to_tools!
+
+      expected_tool = {
+        name: "db-query"
+        description: "Execute a database query"
+        parameters: {
+          type: "OBJECT"
+          properties: {
+            table: {
+              type: "STRING"
+              description: "Table name"
+            }
+            where: {
+              type: "OBJECT"
+              description: "WHERE conditions"
+            }
+            limit: {
+              type: "NUMBER"
+              description: "Result limit"
+              default: 10
+            }
+            offset: {
+              type: "NUMBER"
+              description: "Result offset"
+              default: 0
+            }
+          }
+          required: {"table", "where"}
+        }
+      }
+
+      assert.same {
+        {
+          functionDeclarations: {
+            expected_tool
+          }
+        }
+      }, gemini_tools
 
     it "should execute with complex nested parameters", ->
       result = server\execute_tool "db-query", {
