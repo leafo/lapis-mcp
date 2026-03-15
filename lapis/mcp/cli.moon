@@ -12,6 +12,11 @@ run_cli = (ServerClass, config={}) ->
   -- Create argument parser
   parser = argparse name, "Start an MCP server over stdin/stdout"
   parser\option "--send-message", "Send a raw message by name and exit (e.g. tools/list, resources/list, initialize or a JSON object)"
+  parser\option("--dump-tools", "Output tool specification as LLM API compatible object")\choices {
+    "openai"
+    "anthropic"
+    "gemini"
+  }
   parser\option "--tool", "Immediately invoke a tool, print output and exit"
   parser\option "--tool-argument --arg", "Argument object to pass for tool call (in JSON format)"
   parser\option "--resource", "Immediately fetch a resource by URI, print output and exit"
@@ -19,15 +24,19 @@ run_cli = (ServerClass, config={}) ->
   parser\flag "--debug", "Enable debug logging to stderr"
   parser\flag "--skip-initialize --skip-init", "Skip the initialize stage and listen for messages immediately"
   
-  -- Parse arguments
   args = parser\parse [v for _, v in ipairs _G.arg]
   
-  -- Set debug mode
   server = ServerClass {
     debug: args.debug
   }
 
-  -- Handle --tool immediate invocation
+  if args.dump_tools
+    adapter_class = require "lapis.mcp.tool_adapter.#{args.dump_tools}"
+    adapter = adapter_class server
+    print json.encode adapter\to_tools!
+    return
+
+  -- --tool immediate invocation
   if args.tool
     server\skip_initialize!
     tool_name = args.tool
@@ -46,14 +55,8 @@ run_cli = (ServerClass, config={}) ->
       }
     }
 
-    -- Send message and get response
-    response = server\send_message(message)
-
-    -- Output just the tool result, not the full response
-    if response.result and response.result.content
-      print json.encode(response.result.content)
-    else
-      print json.encode(response)
+    response = server\send_message message
+    print json.encode response.result or response
     return
 
   -- Handle --resource immediate invocation

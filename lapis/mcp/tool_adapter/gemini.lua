@@ -89,13 +89,13 @@ do
         declarations = _accum_0
       end
       if #declarations == 0 then
-        return { }
+        return setmetatable({ }, json.array_mt)
       end
-      return {
+      return setmetatable({
         {
           functionDeclarations = declarations
         }
-      }
+      }, json.array_mt)
     end,
     extract_tool_calls = function(self, message)
       local candidates

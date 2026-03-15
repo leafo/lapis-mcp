@@ -20,15 +20,17 @@ do
       return self:subclass_responsibility("convert_tool")
     end,
     to_tools = function(self)
-      local _accum_0 = { }
-      local _len_0 = 1
-      local _list_0 = self.server:get_enabled_tools()
-      for _index_0 = 1, #_list_0 do
-        local tool = _list_0[_index_0]
-        _accum_0[_len_0] = self:convert_tool(tool)
-        _len_0 = _len_0 + 1
-      end
-      return _accum_0
+      return setmetatable((function()
+        local _accum_0 = { }
+        local _len_0 = 1
+        local _list_0 = self.server:get_enabled_tools()
+        for _index_0 = 1, #_list_0 do
+          local tool = _list_0[_index_0]
+          _accum_0[_len_0] = self:convert_tool(tool)
+          _len_0 = _len_0 + 1
+        end
+        return _accum_0
+      end)(), json.array_mt)
     end,
     extract_tool_calls = function(self, message)
       return self:subclass_responsibility("extract_tool_calls")

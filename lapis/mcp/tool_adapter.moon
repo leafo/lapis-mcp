@@ -32,7 +32,7 @@ class ToolAdapter
 
   -- Convert all available MCP tools to the provider-specific format
   to_tools: =>
-    [@convert_tool(tool) for tool in *@server\get_enabled_tools!]
+    setmetatable [@convert_tool(tool) for tool in *@server\get_enabled_tools!], json.array_mt
 
   -- Decode provider-specific tool calls into a normalized shape
   extract_tool_calls: (message) =>

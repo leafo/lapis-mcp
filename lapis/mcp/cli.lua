@@ -9,6 +9,11 @@ run_cli = function(ServerClass, config)
   local name = config.name or ServerClass.server_name or ServerClass.__name or "mcp-server"
   local parser = argparse(name, "Start an MCP server over stdin/stdout")
   parser:option("--send-message", "Send a raw message by name and exit (e.g. tools/list, resources/list, initialize or a JSON object)")
+  parser:option("--dump-tools", "Output tool specification as LLM API compatible object"):choices({
+    "openai",
+    "anthropic",
+    "gemini"
+  })
   parser:option("--tool", "Immediately invoke a tool, print output and exit")
   parser:option("--tool-argument --arg", "Argument object to pass for tool call (in JSON format)")
   parser:option("--resource", "Immediately fetch a resource by URI, print output and exit")
@@ -26,6 +31,12 @@ run_cli = function(ServerClass, config)
   local server = ServerClass({
     debug = args.debug
   })
+  if args.dump_tools then
+    local adapter_class = require("lapis.mcp.tool_adapter." .. tostring(args.dump_tools))
+    local adapter = adapter_class(server)
+    print(json.encode(adapter:to_tools()))
+    return 
+  end
   if args.tool then
     server:skip_initialize()
     local tool_name = args.tool
@@ -43,11 +54,7 @@ run_cli = function(ServerClass, config)
       }
     }
     local response = server:send_message(message)
-    if response.result and response.result.content then
-      print(json.encode(response.result.content))
-    else
-      print(json.encode(response))
-    end
+    print(json.encode(response.result or response))
     return 
   end
   if args.resource then

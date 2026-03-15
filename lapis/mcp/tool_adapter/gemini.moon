@@ -66,13 +66,13 @@ class GeminiToolAdapter extends ToolAdapter
 
   to_tools: =>
     declarations = [@convert_tool(tool) for tool in *@server\get_enabled_tools!]
-    return {} if #declarations == 0
+    return setmetatable({}, json.array_mt) if #declarations == 0
 
-    {
+    setmetatable {
       {
         functionDeclarations: declarations
       }
-    }
+    }, json.array_mt
 
   extract_tool_calls: (message) =>
     candidates = if type(message.candidates) == "table"

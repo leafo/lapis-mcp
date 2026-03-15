@@ -512,6 +512,7 @@ The `run_cli` method provides several useful command-line options. You can view 
 - `--help` - Show all CLI options
 - `--debug` - Enable debug logging to stderr
 - `--skip-initialize` / `--skip-init` - Skip the initialize stage and listen for messages immediately
+- `--dump-tools <adapter>` - Print tool adapter JSON for `openai`, `anthropic`, or `gemini`, then exit
 - `--tool <tool_name>` - Immediately invoke a specific tool, print output and exit
 - `--tool-argument <json>` / `--arg <json>` - Pass arguments to the tool (in JSON format)
 - `--send-message <message>` - Send a raw message and exit
@@ -526,6 +527,9 @@ When using `run_cli` in a script called `my_server.lua` the following are exampl
 
 # Run with debug logging
 ./my_server.lua --debug
+
+# Print OpenAI tool definitions for all enabled tools
+./my_server.lua --dump-tools openai
 
 # Test a specific tool
 ./my_server.lua --tool list_files --arg '{"path": "/tmp"}'
