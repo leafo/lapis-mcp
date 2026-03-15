@@ -27,6 +27,11 @@ find_lapis_application = (config) ->
       \argument "server_module", "Name of the MCP server module to load", "lapis.mcp.lapis_server"
 
       \option "--send-message", "Send a raw message by name and exit (e.g. tools/list, resources/list, initialize or a JSON object)"
+      \option("--dump-tools", "Output tool specification as LLM API compatible object")\choices {
+        "openai"
+        "anthropic"
+        "gemini"
+      }
       \option "--tool", "Immediately invoke a tool, print output and exit"
       \option "--tool-argument --arg", "Argument object to pass for tool call (in JSON format)"
       \option "--resource", "Immediately fetch a resource by URI, print output and exit"
@@ -42,6 +47,12 @@ find_lapis_application = (config) ->
       debug: args.debug
       app: find_lapis_application(config)
     }
+
+    if args.dump_tools
+      adapter_class = require "lapis.mcp.tool_adapter.#{args.dump_tools}"
+      adapter = adapter_class server
+      print json.encode adapter\to_tools!
+      return
 
     -- Handle --tool immediate invocation
     if args.tool
@@ -62,14 +73,8 @@ find_lapis_application = (config) ->
         }
       }
 
-      -- Send message and get response
       response = server\send_message(message)
-
-      -- Output just the tool result, not the full response
-      if response.result and response.result.content
-        print json.encode(response.result.content)
-      else
-        print json.encode(response)
+      print json.encode response.result or response
       return
 
     -- Handle --resource immediate invocation

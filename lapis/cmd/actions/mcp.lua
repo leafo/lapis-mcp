@@ -23,6 +23,11 @@ return {
       local _with_0 = require("argparse")("lapis mcp", "Run an MCP server over stdin/out that can communicate with details of Lapis app")
       _with_0:argument("server_module", "Name of the MCP server module to load", "lapis.mcp.lapis_server")
       _with_0:option("--send-message", "Send a raw message by name and exit (e.g. tools/list, resources/list, initialize or a JSON object)")
+      _with_0:option("--dump-tools", "Output tool specification as LLM API compatible object"):choices({
+        "openai",
+        "anthropic",
+        "gemini"
+      })
       _with_0:option("--tool", "Immediately invoke a tool, print output and exit")
       _with_0:option("--tool-argument --arg", "Argument object to pass for tool call (in JSON format)")
       _with_0:option("--resource", "Immediately fetch a resource by URI, print output and exit")
@@ -38,6 +43,12 @@ return {
       debug = args.debug,
       app = find_lapis_application(config)
     })
+    if args.dump_tools then
+      local adapter_class = require("lapis.mcp.tool_adapter." .. tostring(args.dump_tools))
+      local adapter = adapter_class(server)
+      print(json.encode(adapter:to_tools()))
+      return 
+    end
     if args.tool then
       server:skip_initialize()
       local tool_name = args.tool
@@ -55,11 +66,7 @@ return {
         }
       }
       local response = server:send_message(message)
-      if response.result and response.result.content then
-        print(json.encode(response.result.content))
-      else
-        print(json.encode(response))
-      end
+      print(json.encode(response.result or response))
       return 
     end
     if args.resource then
