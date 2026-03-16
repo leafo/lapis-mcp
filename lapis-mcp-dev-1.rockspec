@@ -18,7 +18,8 @@ description = {
 
 dependencies = {
   "lua >= 5.1",
-  "lapis"
+  "lapis",
+  "tableshape >= 2.7"
 }
 
 build = {

@@ -232,7 +232,13 @@ do
       if not (tool) then
         return nil, "Unknown tool: " .. tostring(tool_name)
       end
-      if type(tool.inputSchema.required) == "table" then
+      if tool.inputShape then
+        local err
+        arguments, err = tool.inputShape:transform(arguments)
+        if not (arguments) then
+          return nil, err
+        end
+      elseif type(tool.inputSchema.required) == "table" then
         local _list_0 = tool.inputSchema.required
         for _index_0 = 1, #_list_0 do
           local param_name = _list_0[_index_0]
@@ -805,10 +811,20 @@ do
     if not (rawget(self, "tools")) then
       rawset(self, "tools", { })
     end
+    local input_schema
+    if details.inputShape then
+      local is_type
+      is_type = require("tableshape").is_type
+      assert(is_type(details.inputShape), "inputShape: expected a tableshape type")
+      local to_json_schema
+      to_json_schema = require("tableshape.ext.json_schema").to_json_schema
+      input_schema = assert(to_json_schema:transform(details.inputShape))
+    end
     local tool_def = {
       name = details.name,
       description = details.description,
-      inputSchema = details.inputSchema,
+      inputSchema = input_schema or details.inputSchema,
+      inputShape = details.inputShape,
       annotations = details.annotations,
       handler = call_fn,
       hidden = details.hidden or false

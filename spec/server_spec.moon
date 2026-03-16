@@ -1,5 +1,6 @@
 import McpServer, StdioTransport from require "lapis.mcp.server"
 json = require "cjson"
+types = require "lapis.validate.types"
 
 with_mock_transport = (server) ->
   server.transport = {
@@ -719,6 +720,89 @@ describe "McpServer", ->
           isError: false
         }
       }, response
+
+  describe "inputShape tools", ->
+    local server
+
+    before_each ->
+      class InputShapeServer extends McpServer
+        @add_tool {
+          name: "set-title"
+          description: "Set the title of an object"
+          inputShape: types.shape {
+            object_id: types.db_id
+            path: types.limited_text 255
+          }
+        }, (params) => {
+          object_id: params.object_id
+          path: params.path
+        }
+
+      server = InputShapeServer!
+      server\skip_initialize!
+
+    it "should generate inputSchema from inputShape in tools/list", ->
+      response = server\handle_tools_list {
+        jsonrpc: "2.0"
+        id: 9
+        method: "tools/list"
+      }
+
+      tool = response.result.tools[1]
+      assert.equal "set-title", tool.name
+      assert.same {
+        type: "object"
+        additionalProperties: false
+        properties: {
+          object_id: {
+            type: "number"
+            description: "database ID integer"
+          }
+          path: {
+            type: "string"
+            description: "text between 1 and 255 characters"
+          }
+        }
+        required: {"object_id", "path"}
+      }, tool.inputSchema
+
+    it "should execute a tool with validated inputShape arguments", ->
+      response = server\handle_tools_call {
+        jsonrpc: "2.0"
+        id: 10
+        method: "tools/call"
+        params: {
+          name: "set-title"
+          arguments: {
+            object_id: 42
+            path: "posts/hello-world"
+          }
+        }
+      }
+
+      assert.is_false response.result.isError
+      decoded = json.decode response.result.content[1].text
+      assert.same {
+        object_id: 42
+        path: "posts/hello-world"
+      }, decoded
+
+    it "should return inputShape validation errors from tools/call", ->
+      response = server\handle_tools_call {
+        jsonrpc: "2.0"
+        id: 11
+        method: "tools/call"
+        params: {
+          name: "set-title"
+          arguments: {
+            object_id: 42
+          }
+        }
+      }
+
+      assert.is_true response.result.isError
+      assert.equal "text", response.result.content[1].type
+      assert.equal 'field "path": expected text between 1 and 255 characters', response.result.content[1].text
 
   describe "hidden tools", ->
     local server
@@ -1896,4 +1980,3 @@ describe "LapisMcpServer", ->
       assert.is_table routes[1][2]
       assert.equal "/", routes[1][2][1]
       assert.equal "GET", routes[1][2][2]
-

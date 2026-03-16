@@ -103,10 +103,19 @@ class McpServer
     unless rawget(@, "tools")
       rawset(@, "tools", {})
 
+    -- use a tableshape object for validation and input schema
+    input_schema = if details.inputShape
+      import is_type from require "tableshape"
+      -- TODO: this should really verify if it's an shape/partial
+      assert is_type(details.inputShape), "inputShape: expected a tableshape type"
+      import to_json_schema from require "tableshape.ext.json_schema"
+      assert to_json_schema\transform details.inputShape
+
     tool_def = {
       name: details.name
       description: details.description
-      inputSchema: details.inputSchema
+      inputSchema: input_schema or details.inputSchema
+      inputShape: details.inputShape
       annotations: details.annotations
       handler: call_fn
       hidden: details.hidden or false
@@ -245,15 +254,21 @@ class McpServer
       current_class = current_class.__parent
     nil
 
-  -- Execute a tool by name with the given arguments
+  -- Execute a tool by name with the given arguments. Arguments should be a
+  -- parsed object, not a json string
   -- Returns result on success, or nil and an error message on failure
   execute_tool: (tool_name, arguments={}) =>
     tool = @find_tool tool_name
     unless tool
       return nil, "Unknown tool: #{tool_name}"
 
-    -- Validate required parameters
-    if type(tool.inputSchema.required) == "table"
+    if tool.inputShape
+      -- tableshape input validation and transformation
+      arguments, err = tool.inputShape\transform arguments
+      unless arguments
+        return nil, err
+    elseif type(tool.inputSchema.required) == "table"
+      -- default validation strategy, just checking for parameters
       for param_name in *tool.inputSchema.required
         if arguments[param_name] == nil
           return nil, "Missing required parameter: #{param_name}"
