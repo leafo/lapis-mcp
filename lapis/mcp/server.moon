@@ -360,17 +360,9 @@ class McpServer
     -- Store client capabilities
     @client_capabilities = client_capabilities
 
-    -- Check protocol version compatibility
+    -- Version negotiation: respond with our supported version, let client decide compatibility
     if requested_version != @protocol_version
-      @debug_log "error", "Protocol version mismatch: server=#{@protocol_version}, client=#{requested_version}"
-      return {
-        jsonrpc: "2.0"
-        id: message.id
-        error: {
-          code: -32602
-          message: "Protocol version mismatch. Server supports: #{@protocol_version}, client requested: #{requested_version}"
-        }
-      }
+      @debug_log "warn", "Client requested protocol version #{requested_version}, responding with #{@protocol_version}"
 
     @initialized = true
     @debug_log "success", "Server initialized"

@@ -350,7 +350,7 @@ describe "McpServer", ->
 
       assert.is_true server.initialized
 
-    it "should reject protocol version mismatch", ->
+    it "should negotiate protocol version when client requests different version", ->
       response = server\handle_initialize {
         jsonrpc: "2.0"
         id: 1
@@ -360,16 +360,10 @@ describe "McpServer", ->
         }
       }
 
-      assert.same {
-        jsonrpc: "2.0",
-        id: 1,
-        error: {
-          code: -32602,
-          message: "Protocol version mismatch. Server supports: 2025-06-18, client requested: 2024-01-01"
-        }
-      }, response
-
-      assert.is_false server.initialized
+      -- Server should respond with its own version, not error
+      assert.is_table response.result
+      assert.equal "2025-06-18", response.result.protocolVersion
+      assert.is_true server.initialized
 
   describe "handle_message", ->
     local server

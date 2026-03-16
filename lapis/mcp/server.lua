@@ -332,15 +332,7 @@ do
       end
       self.client_capabilities = client_capabilities
       if requested_version ~= self.protocol_version then
-        self:debug_log("error", "Protocol version mismatch: server=" .. tostring(self.protocol_version) .. ", client=" .. tostring(requested_version))
-        return {
-          jsonrpc = "2.0",
-          id = message.id,
-          error = {
-            code = -32602,
-            message = "Protocol version mismatch. Server supports: " .. tostring(self.protocol_version) .. ", client requested: " .. tostring(requested_version)
-          }
-        }
+        self:debug_log("warn", "Client requested protocol version " .. tostring(requested_version) .. ", responding with " .. tostring(self.protocol_version))
       end
       self.initialized = true
       self:debug_log("success", "Server initialized")
