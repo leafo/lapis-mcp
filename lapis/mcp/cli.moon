@@ -3,14 +3,7 @@ json = require "cjson.safe"
 
 CLIENT_NAME = "lapis-mcp-cli"
 
--- Generic CLI runner using argparse
-run_cli = (ServerClass, config={}) ->
-  argparse = require "argparse"
-
-  name = config.name or ServerClass.server_name or ServerClass.__name or "mcp-server"
-  
-  -- Create argument parser
-  parser = argparse name, "Start an MCP server over stdin/stdout"
+add_shared_arguments = (parser) ->
   parser\option "--send-message", "Send a raw message by name and exit (e.g. tools/list, resources/list, initialize or a JSON object)"
   parser\option("--dump-tools", "Output tool specification as LLM API compatible object")\choices {
     "openai"
@@ -20,15 +13,23 @@ run_cli = (ServerClass, config={}) ->
   parser\option "--tool", "Immediately invoke a tool, print output and exit"
   parser\option "--tool-argument --arg", "Argument object to pass for tool call (in JSON format)"
   parser\option "--resource", "Immediately fetch a resource by URI, print output and exit"
-
   parser\flag "--debug", "Enable debug logging to stderr"
   parser\flag "--skip-initialize --skip-init", "Skip the initialize stage and listen for messages immediately"
-  
-  args = parser\parse [v for _, v in ipairs _G.arg]
-  
-  server = ServerClass {
-    debug: args.debug
-  }
+  parser
+
+build_parser = (config={}) ->
+  argparse = require "argparse"
+
+  parser = argparse(
+    config.name or "mcp-server"
+    config.description or "Start an MCP server over stdin/stdout"
+  )
+
+  add_shared_arguments parser
+  config.setup_parser parser if config.setup_parser
+  parser
+
+run_parsed_args = (server, args) ->
 
   if args.dump_tools
     adapter_class = require "lapis.mcp.tool_adapter.#{args.dump_tools}"
@@ -133,4 +134,24 @@ run_cli = (ServerClass, config={}) ->
   -- Run server normally
   server\run_stdio!
 
-{:run_cli}
+-- Generic CLI runner using argparse
+run_cli = (ServerClass, config={}) ->
+  parser = build_parser {
+    name: config.name or ServerClass.server_name or ServerClass.__name or "mcp-server"
+    description: config.description
+    setup_parser: config.setup_parser
+  }
+
+  args = parser\parse [v for _, v in ipairs _G.arg]
+
+  server = ServerClass {
+    debug: args.debug
+  }
+
+  run_parsed_args server, args
+
+{
+  :build_parser
+  :run_parsed_args
+  :run_cli
+}

@@ -1,13 +1,7 @@
 local json = require("cjson.safe")
 local CLIENT_NAME = "lapis-mcp-cli"
-local run_cli
-run_cli = function(ServerClass, config)
-  if config == nil then
-    config = { }
-  end
-  local argparse = require("argparse")
-  local name = config.name or ServerClass.server_name or ServerClass.__name or "mcp-server"
-  local parser = argparse(name, "Start an MCP server over stdin/stdout")
+local add_shared_arguments
+add_shared_arguments = function(parser)
   parser:option("--send-message", "Send a raw message by name and exit (e.g. tools/list, resources/list, initialize or a JSON object)")
   parser:option("--dump-tools", "Output tool specification as LLM API compatible object"):choices({
     "openai",
@@ -19,18 +13,23 @@ run_cli = function(ServerClass, config)
   parser:option("--resource", "Immediately fetch a resource by URI, print output and exit")
   parser:flag("--debug", "Enable debug logging to stderr")
   parser:flag("--skip-initialize --skip-init", "Skip the initialize stage and listen for messages immediately")
-  local args = parser:parse((function()
-    local _accum_0 = { }
-    local _len_0 = 1
-    for _, v in ipairs(_G.arg) do
-      _accum_0[_len_0] = v
-      _len_0 = _len_0 + 1
-    end
-    return _accum_0
-  end)())
-  local server = ServerClass({
-    debug = args.debug
-  })
+  return parser
+end
+local build_parser
+build_parser = function(config)
+  if config == nil then
+    config = { }
+  end
+  local argparse = require("argparse")
+  local parser = argparse(config.name or "mcp-server", config.description or "Start an MCP server over stdin/stdout")
+  add_shared_arguments(parser)
+  if config.setup_parser then
+    config.setup_parser(parser)
+  end
+  return parser
+end
+local run_parsed_args
+run_parsed_args = function(server, args)
   if args.dump_tools then
     local adapter_class = require("lapis.mcp.tool_adapter." .. tostring(args.dump_tools))
     local adapter = adapter_class(server)
@@ -120,6 +119,32 @@ run_cli = function(ServerClass, config)
   end
   return server:run_stdio()
 end
+local run_cli
+run_cli = function(ServerClass, config)
+  if config == nil then
+    config = { }
+  end
+  local parser = build_parser({
+    name = config.name or ServerClass.server_name or ServerClass.__name or "mcp-server",
+    description = config.description,
+    setup_parser = config.setup_parser
+  })
+  local args = parser:parse((function()
+    local _accum_0 = { }
+    local _len_0 = 1
+    for _, v in ipairs(_G.arg) do
+      _accum_0[_len_0] = v
+      _len_0 = _len_0 + 1
+    end
+    return _accum_0
+  end)())
+  local server = ServerClass({
+    debug = args.debug
+  })
+  return run_parsed_args(server, args)
+end
 return {
+  build_parser = build_parser,
+  run_parsed_args = run_parsed_args,
   run_cli = run_cli
 }
