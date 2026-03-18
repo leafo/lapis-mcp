@@ -254,6 +254,77 @@ end)
   }
 ```
 
+### Composing MCP Server Classes
+
+Use `@include` to build one `McpServer` class from the tools defined on other
+server classes. This lets you keep tool groups modular and then assemble a
+combined server for a specific application.
+
+```moonscript
+class SharedFileTools extends McpServer
+  @add_tool {
+    name: "read"
+    description: "Read a file"
+    inputSchema: {
+      type: "object"
+      properties: {
+        path: { type: "string" }
+      }
+      required: {"path"}
+    }
+  }, (params) =>
+    assert(io.open(params.path))\read "*a"
+
+class SharedProjectTools extends McpServer
+  @add_tool {
+    name: "status"
+    description: "Return project status"
+    inputSchema: {
+      type: "object"
+      properties: {}
+      required: {}
+    }
+  }, =>
+    {
+      project: @get_server_name!
+      ok: true
+    }
+
+class AppServer extends McpServer
+  @server_name: "app-server"
+
+  @include SharedProjectTools
+  @include SharedFileTools, prefix: "fs_"
+
+  @add_tool {
+    name: "ping"
+    description: "Health check"
+    inputSchema: {
+      type: "object"
+      properties: {}
+      required: {}
+    }
+  }, -> "pong"
+```
+
+In that example, `AppServer` exposes:
+
+- `status` from `SharedProjectTools`
+- `fs_read` from `SharedFileTools`
+- `ping` defined locally
+
+Notes about composition:
+
+- `prefix` prepends to the imported tool name, so `read` becomes `fs_read`.
+- Included tools are registered onto the receiving class, so they work with `find_tool`, `execute_tool`, adapters, and `tools/list` the same way as locally defined tools.
+- Handlers run with the receiving server instance as `self`, so included tools can call methods like `@get_server_name!` on the composed server.
+- Included classes contribute inherited tools too, not just tools defined directly on that class.
+- `@include` raises an error if the final tool name already exists on the receiving server or from another include. Use `prefix` to avoid collisions.
+
+Visibility management uses the final included tool name, so call
+`hide_tool("fs_read")`, `unhide_tool("fs_read")`, or
+`set_tool_visibility("fs_read", true)` when working with prefixed tools.
+
 ### Error Handling
 
 Tools can return errors using the `nil, error_message` pattern:

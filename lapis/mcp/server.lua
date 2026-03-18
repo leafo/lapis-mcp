@@ -126,6 +126,64 @@ with_initialized = function(fn)
     return fn(self, message)
   end
 end
+local clone_table
+clone_table = function(value, seen)
+  if seen == nil then
+    seen = nil
+  end
+  if not (type(value) == "table") then
+    return value
+  end
+  seen = seen or { }
+  if seen[value] then
+    return seen[value]
+  end
+  local cloned = { }
+  seen[value] = cloned
+  for k, v in pairs(value) do
+    cloned[clone_table(k, seen)] = clone_table(v, seen)
+  end
+  return setmetatable(cloned, getmetatable(value))
+end
+local collect_all_tools
+collect_all_tools = function(server_class)
+  local all_tools = { }
+  local current_class = server_class
+  while current_class do
+    do
+      local tools = rawget(current_class, "tools")
+      if tools then
+        for _index_0 = 1, #tools do
+          local tool = tools[_index_0]
+          if not (all_tools[tool.name]) then
+            all_tools[tool.name] = tool
+          end
+        end
+      end
+    end
+    current_class = current_class.__parent
+  end
+  return all_tools
+end
+local tool_exists_in_chain
+tool_exists_in_chain = function(server_class, tool_name)
+  local current_class = server_class
+  while current_class do
+    do
+      local tools = rawget(current_class, "tools")
+      if tools then
+        for _index_0 = 1, #tools do
+          local tool = tools[_index_0]
+          if tool.name == tool_name then
+            return true
+          end
+        end
+      end
+    end
+    current_class = current_class.__parent
+  end
+  return false
+end
 local McpServer
 do
   local _class_0
@@ -408,23 +466,7 @@ do
       }
     end),
     get_all_tools = function(self)
-      local all_tools = { }
-      local current_class = self.__class
-      while current_class do
-        do
-          local tools = rawget(current_class, "tools")
-          if tools then
-            for _index_0 = 1, #tools do
-              local tool = tools[_index_0]
-              if not (all_tools[tool.name]) then
-                all_tools[tool.name] = tool
-              end
-            end
-          end
-        end
-        current_class = current_class.__parent
-      end
-      return all_tools
+      return collect_all_tools(self.__class)
     end,
     get_enabled_tools = function(self)
       local tools
@@ -822,6 +864,31 @@ do
       hidden = details.hidden or false
     }
     return table.insert(rawget(self, "tools"), tool_def)
+  end
+  self.include = function(self, other_server_class, opts)
+    if opts == nil then
+      opts = { }
+    end
+    assert(type(other_server_class) == "table" and other_server_class.__base, "include: expected MCP server class")
+    local prefix = opts.prefix or ""
+    assert(type(prefix) == "string", "include: prefix must be a string")
+    local target_name = self.server_name or self.__name or "McpServer"
+    local source_name = other_server_class.server_name or other_server_class.__name or "McpServer"
+    for original_name, tool in pairs(collect_all_tools(other_server_class)) do
+      local final_name = prefix .. original_name
+      if tool_exists_in_chain(self, final_name) then
+        error("include collision on " .. tostring(target_name) .. ": source " .. tostring(source_name) .. " tool " .. tostring(original_name) .. " maps to existing tool " .. tostring(final_name))
+      end
+      self:add_tool({
+        name = final_name,
+        description = tool.description,
+        inputSchema = clone_table(tool.inputSchema),
+        inputShape = tool.inputShape,
+        annotations = clone_table(tool.annotations),
+        hidden = tool.hidden
+      }, tool.handler)
+    end
+    return self
   end
   self.add_resource = function(self, details, read_fn)
     if not (rawget(self, "resources")) then

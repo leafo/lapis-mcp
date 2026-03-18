@@ -73,6 +73,44 @@ with_initialized = (fn) ->
 
     fn @, message
 
+clone_table = (value, seen=nil) ->
+  return value unless type(value) == "table"
+
+  seen or= {}
+  return seen[value] if seen[value]
+
+  cloned = {}
+  seen[value] = cloned
+
+  for k, v in pairs value
+    cloned[clone_table(k, seen)] = clone_table(v, seen)
+
+  setmetatable cloned, getmetatable value
+
+collect_all_tools = (server_class) ->
+  all_tools = {}
+  current_class = server_class
+  while current_class
+    if tools = rawget(current_class, "tools")
+      for tool in *tools
+        unless all_tools[tool.name]
+          all_tools[tool.name] = tool
+
+    current_class = current_class.__parent
+
+  all_tools
+
+tool_exists_in_chain = (server_class, tool_name) ->
+  current_class = server_class
+  while current_class
+    if tools = rawget(current_class, "tools")
+      for tool in *tools
+        return true if tool.name == tool_name
+
+    current_class = current_class.__parent
+
+  false
+
 -- Base MCP server class that can be extended
 class McpServer
   -- @server_name: "lapis-mcp"
@@ -122,6 +160,32 @@ class McpServer
     }
 
     table.insert(rawget(@, "tools"), tool_def)
+
+  @include: (other_server_class, opts={}) =>
+    assert type(other_server_class) == "table" and other_server_class.__base, "include: expected MCP server class"
+
+    prefix = opts.prefix or ""
+    assert type(prefix) == "string", "include: prefix must be a string"
+
+    target_name = @server_name or @__name or "McpServer"
+    source_name = other_server_class.server_name or other_server_class.__name or "McpServer"
+
+    for original_name, tool in pairs collect_all_tools other_server_class
+      final_name = prefix .. original_name
+
+      if tool_exists_in_chain @, final_name
+        error "include collision on #{target_name}: source #{source_name} tool #{original_name} maps to existing tool #{final_name}"
+
+      @add_tool {
+        name: final_name
+        description: tool.description
+        inputSchema: clone_table tool.inputSchema
+        inputShape: tool.inputShape
+        annotations: clone_table tool.annotations
+        hidden: tool.hidden
+      }, tool.handler
+
+    @
 
   -- add resource to the server
   -- https://modelcontextprotocol.io/specification/2024-11-05/server/resources.md
@@ -435,16 +499,7 @@ class McpServer
 
   -- Get all tools from the inheritance chain
   get_all_tools: =>
-    all_tools = {}
-    current_class = @__class
-    while current_class
-      if tools = rawget(current_class, "tools")
-        for tool in *tools
-          unless all_tools[tool.name]  -- Don't override tools from parent classes
-            all_tools[tool.name] = tool
-
-      current_class = current_class.__parent
-    all_tools
+    collect_all_tools @__class
 
   -- Get enabled (visible) tools as an array, respecting tool_visibility and hidden
   get_enabled_tools: =>

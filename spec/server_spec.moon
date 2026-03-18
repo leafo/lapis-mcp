@@ -281,6 +281,185 @@ describe "McpServer", ->
       assert.is_not_nil tool_d
       assert.equal "Tool D (Child)", tool_d.annotations.title
 
+  describe "tool inclusion", ->
+    it "should include tools from another server class", ->
+      class SharedServer extends McpServer
+        @add_tool {
+          name: "shared-tool"
+          description: "Shared tool"
+          inputSchema: { type: "object", properties: {}, required: {} }
+          annotations: {
+            title: "Shared Tool"
+          }
+        }, -> "shared result"
+
+      class CombinedServer extends McpServer
+        @include SharedServer
+
+      server = CombinedServer!
+      tool = server\find_tool "shared-tool"
+
+      assert.is_not_nil tool
+      assert.equal "Shared tool", tool.description
+      assert.equal "Shared Tool", tool.annotations.title
+      assert.equal "shared result", server\execute_tool("shared-tool", {})
+
+    it "should include inherited tools from the source server", ->
+      class BaseSharedServer extends McpServer
+        @add_tool {
+          name: "base-tool"
+          description: "Base shared tool"
+          inputSchema: { type: "object", properties: {}, required: {} }
+          annotations: {
+            title: "Base Shared Tool"
+          }
+        }, -> "base shared result"
+
+      class DerivedSharedServer extends BaseSharedServer
+        @add_tool {
+          name: "derived-tool"
+          description: "Derived shared tool"
+          inputSchema: { type: "object", properties: {}, required: {} }
+          annotations: {
+            title: "Derived Shared Tool"
+          }
+        }, -> "derived shared result"
+
+      class CombinedServer extends McpServer
+        @include DerivedSharedServer
+
+      server = CombinedServer!
+
+      assert.equal "base shared result", server\execute_tool("base-tool", {})
+      assert.equal "derived shared result", server\execute_tool("derived-tool", {})
+
+    it "should support prefixing included tool names", ->
+      class SharedServer extends McpServer
+        @add_tool {
+          name: "read"
+          description: "Read tool"
+          inputSchema: { type: "object", properties: {}, required: {} }
+          annotations: {
+            title: "Read Tool"
+          }
+        }, -> "read result"
+
+      class CombinedServer extends McpServer
+        @include SharedServer, prefix: "fs_"
+
+      server = CombinedServer!
+
+      assert.is_nil server\find_tool "read"
+      assert.equal "read result", server\execute_tool("fs_read", {})
+
+    it "should execute included handlers with the target server instance", ->
+      class SharedServer extends McpServer
+        @add_tool {
+          name: "server-name"
+          description: "Reports server name"
+          inputSchema: { type: "object", properties: {}, required: {} }
+          annotations: {
+            title: "Server Name"
+          }
+        }, =>
+          @get_server_name!
+
+      class CombinedServer extends McpServer
+        @server_name: "combined-server"
+        @include SharedServer
+
+      server = CombinedServer!
+      assert.equal "combined-server", server\execute_tool("server-name", {})
+
+    it "should copy metadata tables for included tools", ->
+      class SharedServer extends McpServer
+        @add_tool {
+          name: "meta-tool"
+          description: "Tool with metadata"
+          inputSchema: {
+            type: "object"
+            properties: {
+              path: {
+                type: "string"
+                description: "Original path description"
+              }
+            }
+            required: {"path"}
+          }
+          annotations: {
+            title: "Original Title"
+          }
+        }, -> "meta result"
+
+      class CombinedServer extends McpServer
+        @include SharedServer
+
+      source_tool = SharedServer!\find_tool "meta-tool"
+      included_tool = CombinedServer!\find_tool "meta-tool"
+
+      included_tool.annotations.title = "Updated Title"
+      included_tool.inputSchema.properties.path.description = "Updated path description"
+
+      assert.equal "Original Title", source_tool.annotations.title
+      assert.equal "Original path description", source_tool.inputSchema.properties.path.description
+
+    it "should error when an included tool collides with an existing tool", ->
+      class SharedServer extends McpServer
+        @add_tool {
+          name: "shared-tool"
+          description: "Shared tool"
+          inputSchema: { type: "object", properties: {}, required: {} }
+          annotations: {
+            title: "Shared Tool"
+          }
+        }, -> "shared result"
+
+      success, err = pcall ->
+        class CombinedServer extends McpServer
+          @add_tool {
+            name: "shared-tool"
+            description: "Local tool"
+            inputSchema: { type: "object", properties: {}, required: {} }
+            annotations: {
+              title: "Local Tool"
+            }
+          }, -> "local result"
+
+          @include SharedServer
+
+      assert.is_false success
+      assert.truthy err
+      assert.truthy err\match "include collision"
+
+    it "should error when two includes produce the same final name", ->
+      class FirstSharedServer extends McpServer
+        @add_tool {
+          name: "read"
+          description: "First read tool"
+          inputSchema: { type: "object", properties: {}, required: {} }
+          annotations: {
+            title: "First Read Tool"
+          }
+        }, -> "first read result"
+
+      class SecondSharedServer extends McpServer
+        @add_tool {
+          name: "read"
+          description: "Second read tool"
+          inputSchema: { type: "object", properties: {}, required: {} }
+          annotations: {
+            title: "Second Read Tool"
+          }
+        }, -> "second read result"
+
+      success, err = pcall ->
+        class CombinedServer extends McpServer
+          @include FirstSharedServer, prefix: "fs_"
+          @include SecondSharedServer, prefix: "fs_"
+
+      assert.is_false success
+      assert.truthy err\match "include collision"
+
   describe "server capabilities", ->
     it "should include listChanged in initialization response", ->
       test_server = McpServer!
@@ -971,6 +1150,54 @@ describe "McpServer", ->
       assert.is_true tool_names["tool-2"]
       assert.is_true tool_names["tool-3"]
       assert.is_nil tool_names["tool-1"]
+
+    it "should manage visibility for prefixed included tools", ->
+      class SharedServer extends McpServer
+        @add_tool {
+          name: "read"
+          description: "Shared read tool"
+          inputSchema: { type: "object", properties: {}, required: {} }
+          annotations: { title: "Shared Read Tool" }
+          hidden: true
+        }, -> "read result"
+
+      class PrefixedServer extends McpServer
+        @add_tool {
+          name: "tool-3"
+          description: "Third tool"
+          inputSchema: { type: "object", properties: {}, required: {} }
+          annotations: { title: "Tool 3" }
+        }, -> "result 3"
+
+        @include SharedServer, prefix: "fs_"
+
+      prefixed_server = PrefixedServer!
+      with_mock_transport prefixed_server
+      prefixed_server\skip_initialize!
+
+      response = prefixed_server\handle_tools_list {
+        jsonrpc: "2.0"
+        id: 4
+        method: "tools/list"
+      }
+
+      assert.equal 1, #response.result.tools
+      assert.equal "tool-3", response.result.tools[1].name
+
+      prefixed_server\unhide_tool "fs_read"
+
+      response = prefixed_server\handle_tools_list {
+        jsonrpc: "2.0"
+        id: 5
+        method: "tools/list"
+      }
+
+      tool_names = {}
+      for tool in *response.result.tools
+        tool_names[tool.name] = true
+
+      assert.is_true tool_names["fs_read"]
+      assert.is_true tool_names["tool-3"]
 
   describe "tools list changed notifications", ->
     local test_server, mock_transport
