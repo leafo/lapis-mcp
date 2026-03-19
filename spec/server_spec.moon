@@ -16,7 +16,7 @@ describe "McpServer", ->
     it "should create server with proper defaults", ->
       server = McpServer({})
       assert.is_not_nil server
-      assert.equal "2025-06-18", server.protocol_version
+      assert.equal "2025-11-25", server.protocol_version
       assert.is_false server.initialized
       assert.is_false server.debug
       tools = server\get_all_tools!
@@ -469,7 +469,7 @@ describe "McpServer", ->
         id: 1
         method: "initialize"
         params: {
-          protocolVersion: "2025-06-18"
+          protocolVersion: "2025-11-25"
         }
       }
 
@@ -496,7 +496,7 @@ describe "McpServer", ->
         id: 1
         method: "initialize"
         params: {
-          protocolVersion: "2025-06-18"
+          protocolVersion: "2025-11-25"
           clientInfo: {
             name: "test-client"
             version: "1.0.0"
@@ -509,7 +509,7 @@ describe "McpServer", ->
         id: 1
         jsonrpc: "2.0"
         result: {
-          protocolVersion: "2025-06-18"
+          protocolVersion: "2025-11-25"
           capabilities: {
             tools: {
               listChanged: true
@@ -541,8 +541,39 @@ describe "McpServer", ->
 
       -- Server should respond with its own version, not error
       assert.is_table response.result
-      assert.equal "2025-06-18", response.result.protocolVersion
+      assert.equal "2025-11-25", response.result.protocolVersion
       assert.is_true server.initialized
+
+    it "should include new serverInfo fields when class attrs are set", ->
+      class CustomServer extends McpServer
+        @server_title: "My Custom Server"
+        @server_description: "A server for testing"
+        @server_icons: {{src: "https://example.com/icon.png", mimeType: "image/png"}}
+        @server_website_url: "https://example.com"
+
+      server = CustomServer!
+      response = server\handle_initialize {
+        jsonrpc: "2.0"
+        id: 1
+        method: "initialize"
+        params: { protocolVersion: "2025-11-25" }
+      }
+
+      info = response.result.serverInfo
+      assert.equal "My Custom Server", info.title
+      assert.equal "A server for testing", info.description
+      assert.equal "https://example.com", info.websiteUrl
+      assert.is_table info.icons
+      assert.equal 1, #info.icons
+      assert.equal "https://example.com/icon.png", info.icons[1].src
+
+    it "should omit new serverInfo fields when not set", ->
+      server = McpServer!
+      spec = server\server_specification!
+      assert.is_nil spec.serverInfo.title
+      assert.is_nil spec.serverInfo.description
+      assert.is_nil spec.serverInfo.icons
+      assert.is_nil spec.serverInfo.websiteUrl
 
   describe "handle_message", ->
     local server
@@ -557,13 +588,13 @@ describe "McpServer", ->
         id: 1
         method: "initialize"
         params: {
-          protocolVersion: "2025-06-18"
+          protocolVersion: "2025-11-25"
         }
       }
 
       response = server\handle_message(init_message)
       assert.is_table response.result
-      assert.equal "2025-06-18", response.result.protocolVersion
+      assert.equal "2025-11-25", response.result.protocolVersion
 
       -- Test tools/list
       list_message = {
@@ -683,6 +714,44 @@ describe "McpServer", ->
 
       assert.is_true tool_names["test-tool"]
       assert.is_true tool_names["bogus-tool"]
+
+    it "should include title, icons, outputSchema in tools/list", ->
+      class FancyToolServer extends McpServer
+        @add_tool {
+          name: "fancy-tool"
+          description: "A fancy tool"
+          title: "Fancy Tool Display Name"
+          icons: {{src: "https://example.com/tool.png", mimeType: "image/png"}}
+          outputSchema: {type: "object", properties: {result: {type: "string"}}, required: {"result"}}
+          inputSchema: {type: "object", properties: {}, required: {}}
+        }, -> "result"
+
+      fancy_server = FancyToolServer!
+      fancy_server\skip_initialize!
+
+      response = fancy_server\handle_tools_list {
+        jsonrpc: "2.0", id: 1, method: "tools/list"
+      }
+
+      tool = response.result.tools[1]
+      assert.equal "fancy-tool", tool.name
+      assert.equal "Fancy Tool Display Name", tool.title
+      assert.is_table tool.icons
+      assert.equal 1, #tool.icons
+      assert.equal "https://example.com/tool.png", tool.icons[1].src
+      assert.is_table tool.outputSchema
+      assert.equal "object", tool.outputSchema.type
+
+    it "should omit title, icons, outputSchema when not set", ->
+      server\skip_initialize!
+      response = server\handle_tools_list {
+        jsonrpc: "2.0", id: 1, method: "tools/list"
+      }
+
+      tool = response.result.tools[1]
+      assert.is_nil tool.title
+      assert.is_nil tool.icons
+      assert.is_nil tool.outputSchema
 
   describe "handle_tools_call", ->
     local server
@@ -1374,6 +1443,43 @@ describe "McpServer", ->
         assert.equal "A visible resource", resource.description
         assert.equal "text/plain", resource.mimeType
 
+      it "should include title, icons, size in resources/list", ->
+        class FancyResourceServer extends McpServer
+          @add_resource {
+            uri: "test://fancy"
+            name: "Fancy Resource"
+            title: "Fancy Resource Display"
+            icons: {{src: "https://example.com/res.png", mimeType: "image/png"}}
+            size: 1024
+            mimeType: "text/plain"
+          }, -> "content"
+
+        fancy_server = FancyResourceServer!
+        fancy_server\skip_initialize!
+
+        response = fancy_server\handle_resources_list {
+          jsonrpc: "2.0", id: 1, method: "resources/list"
+        }
+
+        resource = response.result.resources[1]
+        assert.equal "Fancy Resource Display", resource.title
+        assert.is_table resource.icons
+        assert.equal 1, #resource.icons
+        assert.equal "https://example.com/res.png", resource.icons[1].src
+        assert.equal 1024, resource.size
+
+      it "should omit title, icons, size when not set on resources", ->
+        server\skip_initialize!
+
+        response = server\handle_resources_list {
+          jsonrpc: "2.0", id: 1, method: "resources/list"
+        }
+
+        resource = response.result.resources[1]
+        assert.is_nil resource.title
+        assert.is_nil resource.icons
+        assert.is_nil resource.size
+
       it "should return empty list for resources/templates/list", ->
         server\skip_initialize!
         response = server\handle_resources_templates_list {
@@ -1574,7 +1680,7 @@ describe "McpServer", ->
           id: 1
           method: "initialize"
           params: {
-            protocolVersion: "2025-06-18"
+            protocolVersion: "2025-11-25"
           }
         }
 

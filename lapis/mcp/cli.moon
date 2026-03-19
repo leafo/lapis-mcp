@@ -109,7 +109,7 @@ run_parsed_args = (server, args) ->
           id: "init-#{os.time!}"
           method: "initialize"
           params: {
-            protocolVersion: "2025-06-18"
+            protocolVersion: "2025-11-25"
             capabilities: {}
             clientInfo: {
               name: CLIENT_NAME

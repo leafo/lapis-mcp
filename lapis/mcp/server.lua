@@ -417,8 +417,12 @@ do
         capabilities = self.server_capabilities,
         serverInfo = {
           name = self:get_server_name(),
+          title = self.__class.server_title,
+          description = self.__class.server_description,
+          icons = self.__class.server_icons,
           version = self.__class.server_version,
-          vendor = self.__class.server_vendor
+          vendor = self.__class.server_vendor,
+          websiteUrl = self.__class.server_website_url
         },
         instructions = self.__class.instructions
       }
@@ -533,7 +537,10 @@ do
           _accum_0[_len_0] = {
             name = tool.name,
             description = tool.description,
+            title = tool.title,
+            icons = tool.icons,
             inputSchema = tool.inputSchema,
+            outputSchema = tool.outputSchema,
             annotations = tool.annotations
           }
           _len_0 = _len_0 + 1
@@ -574,6 +581,9 @@ do
               uri = resource.uri,
               name = resource.name,
               description = resource.description,
+              title = resource.title,
+              icons = resource.icons,
+              size = resource.size,
               mimeType = resource.mimeType,
               annotations = resource.annotations
             }
@@ -624,6 +634,8 @@ do
               uriTemplate = resource.uriTemplate,
               name = resource.name,
               description = resource.description,
+              title = resource.title,
+              icons = resource.icons,
               mimeType = resource.mimeType,
               annotations = resource.annotations
             }
@@ -798,7 +810,7 @@ do
         options = { }
       end
       self.debug = options.debug or false
-      self.protocol_version = "2025-06-18"
+      self.protocol_version = "2025-11-25"
       self.server_capabilities = {
         tools = {
           listChanged = true
@@ -857,8 +869,11 @@ do
     local tool_def = {
       name = details.name,
       description = details.description,
+      title = details.title,
+      icons = details.icons,
       inputSchema = input_schema or details.inputSchema,
       inputShape = details.inputShape,
+      outputSchema = details.outputSchema,
       annotations = details.annotations,
       handler = call_fn,
       hidden = details.hidden or false
@@ -882,8 +897,11 @@ do
       self:add_tool({
         name = final_name,
         description = tool.description,
+        title = tool.title,
+        icons = clone_table(tool.icons),
         inputSchema = clone_table(tool.inputSchema),
         inputShape = tool.inputShape,
+        outputSchema = clone_table(tool.outputSchema),
         annotations = clone_table(tool.annotations),
         hidden = tool.hidden
       }, tool.handler)
@@ -906,6 +924,9 @@ do
       lpeg_pattern = lpeg_pattern,
       name = details.name,
       description = details.description,
+      title = details.title,
+      icons = details.icons,
+      size = details.size,
       mimeType = details.mimeType,
       annotations = details.annotations,
       handler = read_fn,

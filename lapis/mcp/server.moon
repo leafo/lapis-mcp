@@ -116,6 +116,10 @@ class McpServer
   -- @server_name: "lapis-mcp"
   @server_version: "1.0.0"
   @server_vendor: "Lapis"
+  -- @server_title: nil
+  -- @server_description: nil
+  -- @server_icons: nil
+  -- @server_website_url: nil
 
   -- Generic CLI runner using argparse
   @run_cli: (config) =>
@@ -152,8 +156,11 @@ class McpServer
     tool_def = {
       name: details.name
       description: details.description
+      title: details.title
+      icons: details.icons
       inputSchema: input_schema or details.inputSchema
       inputShape: details.inputShape
+      outputSchema: details.outputSchema
       annotations: details.annotations
       handler: call_fn
       hidden: details.hidden or false
@@ -179,8 +186,11 @@ class McpServer
       @add_tool {
         name: final_name
         description: tool.description
+        title: tool.title
+        icons: clone_table tool.icons
         inputSchema: clone_table tool.inputSchema
         inputShape: tool.inputShape
+        outputSchema: clone_table tool.outputSchema
         annotations: clone_table tool.annotations
         hidden: tool.hidden
       }, tool.handler
@@ -207,6 +217,9 @@ class McpServer
 
       name: details.name
       description: details.description
+      title: details.title
+      icons: details.icons
+      size: details.size
       mimeType: details.mimeType
 
       annotations: details.annotations
@@ -269,7 +282,7 @@ class McpServer
 
   new: (options = {}) =>
     @debug = options.debug or false
-    @protocol_version = "2025-06-18"
+    @protocol_version = "2025-11-25"
     @server_capabilities = {
       tools: {
         listChanged: true
@@ -448,8 +461,12 @@ class McpServer
       capabilities: @server_capabilities
       serverInfo: {
         name: @get_server_name!
+        title: @@server_title
+        description: @@server_description
+        icons: @@server_icons
         version: @@server_version
         vendor: @@server_vendor
+        websiteUrl: @@server_website_url
       }
       instructions: @@instructions
     }
@@ -536,7 +553,10 @@ class McpServer
       {
         name: tool.name
         description: tool.description
+        title: tool.title
+        icons: tool.icons
         inputSchema: tool.inputSchema
+        outputSchema: tool.outputSchema
         annotations: tool.annotations
       }
 
@@ -564,6 +584,9 @@ class McpServer
         uri: resource.uri
         name: resource.name
         description: resource.description
+        title: resource.title
+        icons: resource.icons
+        size: resource.size
         mimeType: resource.mimeType
         annotations: resource.annotations
       }
@@ -595,6 +618,8 @@ class McpServer
         uriTemplate: resource.uriTemplate
         name: resource.name
         description: resource.description
+        title: resource.title
+        icons: resource.icons
         mimeType: resource.mimeType
         annotations: resource.annotations
       }
