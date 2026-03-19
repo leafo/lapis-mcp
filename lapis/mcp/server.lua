@@ -2,6 +2,16 @@ local json = require("cjson.safe")
 local colors = require("ansicolors")
 local insert
 insert = table.insert
+local types
+types = require("tableshape").types
+local with_args
+with_args = require("tableshape.ext.with_args").with_args
+local subclass_of
+subclass_of = require("tableshape.moonscript").subclass_of
+local fix_t
+fix_t = function(t, b)
+  return t + b * t
+end
 local StdioTransport
 do
   local _class_0
@@ -260,6 +270,36 @@ do
     end,
     hide_tool = function(self, tool_name)
       return self:set_tool_visibility(tool_name, false)
+    end,
+    set_visibility_by_tags = function(self, tags)
+      if not (tags and #tags > 0) then
+        return 
+      end
+      local tag_set
+      do
+        local _tbl_0 = { }
+        for _index_0 = 1, #tags do
+          local t = tags[_index_0]
+          _tbl_0[t] = true
+        end
+        tag_set = _tbl_0
+      end
+      for name, tool in pairs(self:get_all_tools()) do
+        local has_match = false
+        if tool.tags then
+          local _list_0 = tool.tags
+          for _index_0 = 1, #_list_0 do
+            local t = _list_0[_index_0]
+            if tag_set[t] then
+              has_match = true
+              break
+            end
+          end
+        end
+        if not (has_match) then
+          self:set_tool_visibility(name, false)
+        end
+      end
     end,
     debug_log = function(self, level, message)
       if not (self.debug) then
@@ -899,25 +939,27 @@ do
     }
     return table.insert(rawget(self, "tools"), tool_def)
   end
-  self.include = function(self, other_server_class, opts)
+  self.include = with_args({
+    assert = true,
+    types.table,
+    fix_t(subclass_of("McpServer"):describe("subclass of McpServer"), types.string / require),
+    types.shape({
+      prefix = types.string:is_optional(),
+      add_tags = types.array_of(types.string):is_optional(),
+      filter_tags = types.array_of(types.string):is_optional()
+    }):is_optional()
+  }, function(self, other_server_class, opts)
     if opts == nil then
       opts = { }
     end
-    if type(other_server_class) == "string" then
-      other_server_class = require(other_server_class)
-    end
-    local subclass_of
-    subclass_of = require("tableshape.moonscript").subclass_of
-    assert(subclass_of(McpServer):describe("include: expected subclass of McpServer")(other_server_class))
     local prefix = opts.prefix or ""
-    assert(type(prefix) == "string", "include: prefix must be a string")
     local target_name = self.server_name or self.__name or "McpServer"
     local source_name = other_server_class.server_name or other_server_class.__name or "McpServer"
     for original_name, tool in pairs(collect_all_tools(other_server_class)) do
       local _continue_0 = false
       repeat
         local final_name = prefix .. original_name
-        if opts.tags then
+        if opts.filter_tags then
           local tool_tags
           if tool.tags then
             do
@@ -935,7 +977,7 @@ do
             break
           end
           local has_match = false
-          local _list_0 = opts.tags
+          local _list_0 = opts.filter_tags
           for _index_0 = 1, #_list_0 do
             local t = _list_0[_index_0]
             if tool_tags[t] then
@@ -962,7 +1004,34 @@ do
           outputShape = tool.outputShape,
           annotations = clone_table(tool.annotations),
           hidden = tool.hidden,
-          tags = tool.tags
+          tags = (function()
+            if opts.add_tags then
+              local combined
+              do
+                local _tbl_0 = { }
+                local _list_0 = (tool.tags or { })
+                for _index_0 = 1, #_list_0 do
+                  local t = _list_0[_index_0]
+                  _tbl_0[t] = true
+                end
+                combined = _tbl_0
+              end
+              local _list_0 = opts.add_tags
+              for _index_0 = 1, #_list_0 do
+                local t = _list_0[_index_0]
+                combined[t] = true
+              end
+              local _accum_0 = { }
+              local _len_0 = 1
+              for t in pairs(combined) do
+                _accum_0[_len_0] = t
+                _len_0 = _len_0 + 1
+              end
+              return _accum_0
+            else
+              return tool.tags
+            end
+          end)()
         }, tool.handler)
         _continue_0 = true
       until true
@@ -971,7 +1040,7 @@ do
       end
     end
     return self
-  end
+  end)
   self.add_resource = function(self, details, read_fn)
     if not (rawget(self, "resources")) then
       rawset(self, "resources", { })

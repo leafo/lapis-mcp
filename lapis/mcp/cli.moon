@@ -13,6 +13,7 @@ add_shared_arguments = (parser) ->
   parser\option "--tool", "Immediately invoke a tool, print output and exit"
   parser\option "--tool-argument --arg", "Argument object to pass for tool call (in JSON format)"
   parser\option "--resource", "Immediately fetch a resource by URI, print output and exit"
+  parser\option("--tag", "Only expose tools matching this tag (can be specified multiple times)")\count("*")
   parser\flag "--debug", "Enable debug logging to stderr"
   parser\flag "--skip-initialize --skip-init", "Skip the initialize stage and listen for messages immediately"
   parser
@@ -30,6 +31,9 @@ build_parser = (config={}) ->
   parser
 
 run_parsed_args = (server, args) ->
+
+  if args.tag and #args.tag > 0
+    server\set_visibility_by_tags args.tag
 
   if args.dump_tools
     adapter_class = require "lapis.mcp.tool_adapter.#{args.dump_tools}"

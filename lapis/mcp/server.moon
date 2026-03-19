@@ -2,8 +2,14 @@ json = require "cjson.safe"
 colors = require "ansicolors"
 import insert from table
 
+import types from require "tableshape"
+import with_args from require "tableshape.ext.with_args"
+import subclass_of from require "tableshape.moonscript"
+
 -- MCP server implementation for Lapis
 -- Follows Model Context Protocol spec: https://modelcontextprotocol.io/
+
+fix_t = (t, b) -> t + b * t
 
 class StdioTransport
   -- IO and message handling
@@ -187,15 +193,19 @@ class McpServer
 
     table.insert(rawget(@, "tools"), tool_def)
 
-  @include: (other_server_class, opts={}) =>
-    if type(other_server_class) == "string"
-      other_server_class = require other_server_class
+  @include: with_args {
+    assert: true
+    types.table -- self
 
-    import subclass_of from require "tableshape.moonscript"
-    assert subclass_of(McpServer)\describe("include: expected subclass of McpServer") other_server_class
+    fix_t subclass_of("McpServer")\describe("subclass of McpServer"), types.string / require
 
+    types.shape({
+      prefix: types.string\is_optional!
+      add_tags: types.array_of(types.string)\is_optional!
+      filter_tags: types.array_of(types.string)\is_optional!
+    })\is_optional!
+  }, (other_server_class, opts={}) =>
     prefix = opts.prefix or ""
-    assert type(prefix) == "string", "include: prefix must be a string"
 
     target_name = @server_name or @__name or "McpServer"
     source_name = other_server_class.server_name or other_server_class.__name or "McpServer"
@@ -203,12 +213,12 @@ class McpServer
     for original_name, tool in pairs collect_all_tools other_server_class
       final_name = prefix .. original_name
 
-      if opts.tags
+      if opts.filter_tags
         tool_tags = if tool.tags
           {t, true for t in *tool.tags}
         continue unless tool_tags
         has_match = false
-        for t in *opts.tags
+        for t in *opts.filter_tags
           if tool_tags[t]
             has_match = true
             break
@@ -228,7 +238,13 @@ class McpServer
         outputShape: tool.outputShape
         annotations: clone_table tool.annotations
         hidden: tool.hidden
-        tags: tool.tags
+        tags: if opts.add_tags
+          combined = {t, true for t in *(tool.tags or {})}
+          for t in *opts.add_tags
+            combined[t] = true
+          [t for t in pairs combined]
+        else
+          tool.tags
       }, tool.handler
 
     @
@@ -315,6 +331,21 @@ class McpServer
   -- hide a tool by name
   hide_tool: (tool_name) =>
     @set_tool_visibility tool_name, false
+
+  -- hide all tools that don't match at least one of the provided tags
+  -- tags: array of strings
+  set_visibility_by_tags: (tags) =>
+    return unless tags and #tags > 0
+    tag_set = {t, true for t in *tags}
+    for name, tool in pairs @get_all_tools!
+      has_match = false
+      if tool.tags
+        for t in *tool.tags
+          if tag_set[t]
+            has_match = true
+            break
+      unless has_match
+        @set_tool_visibility name, false
 
   new: (options = {}) =>
     @debug = options.debug or false

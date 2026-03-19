@@ -484,7 +484,7 @@ describe "McpServer", ->
         }, -> "write-file result"
 
       class CombinedServer extends McpServer
-        @include SharedServer, tags: {"read"}
+        @include SharedServer, filter_tags: {"read"}
 
       server = CombinedServer!
       assert.is_not_nil server\find_tool "read-file"
@@ -507,7 +507,7 @@ describe "McpServer", ->
         }, -> "untagged result"
 
       class CombinedServer extends McpServer
-        @include SharedServer, tags: {"read"}
+        @include SharedServer, filter_tags: {"read"}
 
       server = CombinedServer!
       assert.is_not_nil server\find_tool "tagged-tool"
@@ -534,6 +534,54 @@ describe "McpServer", ->
       server = CombinedServer!
       assert.is_not_nil server\find_tool "tagged-tool"
       assert.is_not_nil server\find_tool "untagged-tool"
+
+    it "should append tags to included tools with add_tags", ->
+      class SharedServer extends McpServer
+        @add_tool {
+          name: "existing-tags"
+          description: "Tool with existing tags"
+          inputSchema: { type: "object", properties: {}, required: {} }
+          tags: {"read"}
+        }, -> "existing result"
+
+        @add_tool {
+          name: "no-tags"
+          description: "Tool without tags"
+          inputSchema: { type: "object", properties: {}, required: {} }
+        }, -> "no tags result"
+
+      class CombinedServer extends McpServer
+        @include SharedServer, add_tags: {"shared"}
+
+      server = CombinedServer!
+
+      existing = server\find_tool "existing-tags"
+      tag_set = {t, true for t in *existing.tags}
+      assert.truthy tag_set["read"]
+      assert.truthy tag_set["shared"]
+
+      no_tags = server\find_tool "no-tags"
+      assert.same {"shared"}, no_tags.tags
+
+    it "should not duplicate tags when add_tags overlaps", ->
+      class SharedServer extends McpServer
+        @add_tool {
+          name: "tool"
+          description: "Tool"
+          inputSchema: { type: "object", properties: {}, required: {} }
+          tags: {"read", "shared"}
+        }, -> "result"
+
+      class CombinedServer extends McpServer
+        @include SharedServer, add_tags: {"shared", "extra"}
+
+      server = CombinedServer!
+      tool = server\find_tool "tool"
+      tag_set = {t, true for t in *tool.tags}
+      assert.truthy tag_set["read"]
+      assert.truthy tag_set["shared"]
+      assert.truthy tag_set["extra"]
+      assert.equal 3, #tool.tags
 
   describe "server capabilities", ->
     it "should include listChanged in initialization response", ->
@@ -1516,6 +1564,68 @@ describe "McpServer", ->
       test_server\set_tool_visibility(visibility_map)
 
       assert.equal initial_count + 1, #mock_transport.messages
+
+  describe "set_visibility_by_tags", ->
+    it "should hide tools that don't match provided tags", ->
+      class TagServer extends McpServer
+        @add_tool {
+          name: "read-tool"
+          description: "Read tool"
+          inputSchema: { type: "object", properties: {}, required: {} }
+          tags: {"read"}
+        }, -> "read"
+
+        @add_tool {
+          name: "write-tool"
+          description: "Write tool"
+          inputSchema: { type: "object", properties: {}, required: {} }
+          tags: {"write"}
+        }, -> "write"
+
+        @add_tool {
+          name: "admin-tool"
+          description: "Admin tool"
+          inputSchema: { type: "object", properties: {}, required: {} }
+          tags: {"admin", "read"}
+        }, -> "admin"
+
+        @add_tool {
+          name: "untagged-tool"
+          description: "Untagged tool"
+          inputSchema: { type: "object", properties: {}, required: {} }
+        }, -> "untagged"
+
+      server = TagServer!
+      server\set_visibility_by_tags {"read"}
+
+      enabled = {tool.name, true for tool in *server\get_enabled_tools!}
+      assert.truthy enabled["read-tool"]
+      assert.truthy enabled["admin-tool"]
+      assert.falsy enabled["write-tool"]
+      assert.falsy enabled["untagged-tool"]
+
+    it "should not filter when tags is nil or empty", ->
+      class TagServer extends McpServer
+        @add_tool {
+          name: "tool-a"
+          description: "Tool A"
+          inputSchema: { type: "object", properties: {}, required: {} }
+          tags: {"read"}
+        }, -> "a"
+
+        @add_tool {
+          name: "tool-b"
+          description: "Tool B"
+          inputSchema: { type: "object", properties: {}, required: {} }
+        }, -> "b"
+
+      server = TagServer!
+      server\set_visibility_by_tags {}
+      assert.equal 2, #server\get_enabled_tools!
+
+      server2 = TagServer!
+      server2\set_visibility_by_tags nil
+      assert.equal 2, #server2\get_enabled_tools!
 
   describe "resources", ->
     describe "basic resource functionality", ->
