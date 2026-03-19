@@ -87,6 +87,24 @@ clone_table = (value, seen=nil) ->
 
   setmetatable cloned, getmetatable value
 
+schema_from_shape = (shape, label) ->
+  import is_type from require "tableshape"
+  assert is_type(shape), "#{label}: expected a tableshape type"
+  import to_json_schema from require "tableshape.ext.json_schema"
+  assert to_json_schema\transform shape
+
+text_content = (value) ->
+  {
+    {
+      type: "text"
+      text: switch type value
+        when "string"
+          value
+        else
+          json.encode(value) or tostring(value)
+    }
+  }
+
 collect_all_tools = (server_class) ->
   all_tools = {}
   current_class = server_class
@@ -147,11 +165,10 @@ class McpServer
 
     -- use a tableshape object for validation and input schema
     input_schema = if details.inputShape
-      import is_type from require "tableshape"
-      -- TODO: this should really verify if it's an shape/partial
-      assert is_type(details.inputShape), "inputShape: expected a tableshape type"
-      import to_json_schema from require "tableshape.ext.json_schema"
-      assert to_json_schema\transform details.inputShape
+      schema_from_shape details.inputShape, "inputShape"
+
+    output_schema = if details.outputShape
+      schema_from_shape details.outputShape, "outputShape"
 
     tool_def = {
       name: details.name
@@ -160,7 +177,8 @@ class McpServer
       icons: details.icons
       inputSchema: input_schema or details.inputSchema
       inputShape: details.inputShape
-      outputSchema: details.outputSchema
+      outputSchema: output_schema or details.outputSchema
+      outputShape: details.outputShape
       annotations: details.annotations
       handler: call_fn
       hidden: details.hidden or false
@@ -191,6 +209,7 @@ class McpServer
         inputSchema: clone_table tool.inputSchema
         inputShape: tool.inputShape
         outputSchema: clone_table tool.outputSchema
+        outputShape: tool.outputShape
         annotations: clone_table tool.annotations
         hidden: tool.hidden
       }, tool.handler
@@ -473,6 +492,7 @@ class McpServer
 
   handle_tools_call: with_initialized (message) =>
     tool_name = message.params.name
+    tool = @find_tool tool_name
 
     @debug_log "info", "Executing tool: #{tool_name}"
 
@@ -496,22 +516,18 @@ class McpServer
 
     @debug_log "success", "Tool executed successfully: #{tool_name}"
 
+    response_result = {
+      content: text_content result
+      isError: false
+    }
+
+    if tool and tool.outputSchema and type(result) == "table"
+      response_result.structuredContent = result
+
     return {
       jsonrpc: "2.0"
       id: message.id
-      result: {
-        content: {
-          {
-            type: "text"
-            text: switch type result
-              when "string"
-                result
-              else
-                json.encode(result) or result
-          }
-        }
-        isError: false
-      }
+      result: response_result
     }
 
   -- Get all tools from the inheritance chain

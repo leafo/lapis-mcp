@@ -145,6 +145,31 @@ clone_table = function(value, seen)
   end
   return setmetatable(cloned, getmetatable(value))
 end
+local schema_from_shape
+schema_from_shape = function(shape, label)
+  local is_type
+  is_type = require("tableshape").is_type
+  assert(is_type(shape), tostring(label) .. ": expected a tableshape type")
+  local to_json_schema
+  to_json_schema = require("tableshape.ext.json_schema").to_json_schema
+  return assert(to_json_schema:transform(shape))
+end
+local text_content
+text_content = function(value)
+  return {
+    {
+      type = "text",
+      text = (function()
+        local _exp_0 = type(value)
+        if "string" == _exp_0 then
+          return value
+        else
+          return json.encode(value) or tostring(value)
+        end
+      end)()
+    }
+  }
+end
 local collect_all_tools
 collect_all_tools = function(server_class)
   local all_tools = { }
@@ -429,6 +454,7 @@ do
     end,
     handle_tools_call = with_initialized(function(self, message)
       local tool_name = message.params.name
+      local tool = self:find_tool(tool_name)
       self:debug_log("info", "Executing tool: " .. tostring(tool_name))
       local result, err = self:execute_tool(tool_name, message.params.arguments or { })
       if err then
@@ -448,25 +474,17 @@ do
         }
       end
       self:debug_log("success", "Tool executed successfully: " .. tostring(tool_name))
+      local response_result = {
+        content = text_content(result),
+        isError = false
+      }
+      if tool and tool.outputSchema and type(result) == "table" then
+        response_result.structuredContent = result
+      end
       return {
         jsonrpc = "2.0",
         id = message.id,
-        result = {
-          content = {
-            {
-              type = "text",
-              text = (function()
-                local _exp_0 = type(result)
-                if "string" == _exp_0 then
-                  return result
-                else
-                  return json.encode(result) or result
-                end
-              end)()
-            }
-          },
-          isError = false
-        }
+        result = response_result
       }
     end),
     get_all_tools = function(self)
@@ -859,12 +877,11 @@ do
     end
     local input_schema
     if details.inputShape then
-      local is_type
-      is_type = require("tableshape").is_type
-      assert(is_type(details.inputShape), "inputShape: expected a tableshape type")
-      local to_json_schema
-      to_json_schema = require("tableshape.ext.json_schema").to_json_schema
-      input_schema = assert(to_json_schema:transform(details.inputShape))
+      input_schema = schema_from_shape(details.inputShape, "inputShape")
+    end
+    local output_schema
+    if details.outputShape then
+      output_schema = schema_from_shape(details.outputShape, "outputShape")
     end
     local tool_def = {
       name = details.name,
@@ -873,7 +890,8 @@ do
       icons = details.icons,
       inputSchema = input_schema or details.inputSchema,
       inputShape = details.inputShape,
-      outputSchema = details.outputSchema,
+      outputSchema = output_schema or details.outputSchema,
+      outputShape = details.outputShape,
       annotations = details.annotations,
       handler = call_fn,
       hidden = details.hidden or false
@@ -902,6 +920,7 @@ do
         inputSchema = clone_table(tool.inputSchema),
         inputShape = tool.inputShape,
         outputSchema = clone_table(tool.outputSchema),
+        outputShape = tool.outputShape,
         annotations = clone_table(tool.annotations),
         hidden = tool.hidden
       }, tool.handler)

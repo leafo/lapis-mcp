@@ -770,6 +770,20 @@ describe "McpServer", ->
         }, -> {"key": "value", "number": 42}
 
         @add_tool {
+          name: "structured-tool"
+          description: "Returns structured data"
+          inputSchema: { type: "object", properties: {}, required: {} }
+          outputSchema: {
+            type: "object"
+            properties: {
+              key: { type: "string" }
+              number: { type: "number" }
+            }
+            required: {"key", "number"}
+          }
+        }, -> {"key": "value", "number": 42}
+
+        @add_tool {
           name: "error-tool"
           description: "Returns nil and an error"
           inputSchema: { type: "object", properties: {}, required: {} }
@@ -882,6 +896,33 @@ describe "McpServer", ->
         number: 42
       }, decoded_result
 
+      assert.is_nil response.result.structuredContent
+      assert.is_false response.result.isError
+
+    it "should include structuredContent when outputSchema is defined", ->
+      response = server\handle_tools_call {
+        jsonrpc: "2.0"
+        id: 6
+        method: "tools/call"
+        params: {
+          name: "structured-tool"
+          arguments: {}
+        }
+      }
+
+      assert.equal "2.0", response.jsonrpc
+      assert.equal 6, response.id
+      assert.is_table response.result
+      assert.is_table response.result.content
+      assert.equal "text", response.result.content[1].type
+
+      assert.same {
+        key: "value"
+        number: 42
+      }, response.result.structuredContent
+
+      decoded_result = json.decode response.result.content[1].text
+      assert.same response.result.structuredContent, decoded_result
       assert.is_false response.result.isError
 
     it "should handle tool returning nil and an error", ->
@@ -1045,6 +1086,69 @@ describe "McpServer", ->
       assert.is_true response.result.isError
       assert.equal "text", response.result.content[1].type
       assert.equal 'field "path": expected text between 1 and 255 characters', response.result.content[1].text
+
+  describe "outputShape tools", ->
+    local server
+
+    before_each ->
+      class OutputShapeServer extends McpServer
+        @add_tool {
+          name: "get-file-metadata"
+          description: "Returns metadata for a file"
+          inputSchema: { type: "object", properties: {}, required: {} }
+          outputShape: types.shape {
+            object_id: types.db_id
+            path: types.limited_text 255
+          }
+        }, -> {
+          object_id: 42
+          path: "posts/hello-world"
+        }
+
+      server = OutputShapeServer!
+      server\skip_initialize!
+
+    it "should generate outputSchema from outputShape in tools/list", ->
+      response = server\handle_tools_list {
+        jsonrpc: "2.0"
+        id: 12
+        method: "tools/list"
+      }
+
+      tool = response.result.tools[1]
+      assert.equal "get-file-metadata", tool.name
+      assert.same {
+        type: "object"
+        additionalProperties: false
+        properties: {
+          object_id: {
+            type: "number"
+            description: "database ID integer"
+          }
+          path: {
+            type: "string"
+            description: "text between 1 and 255 characters"
+          }
+        }
+        required: {"object_id", "path"}
+      }, tool.outputSchema
+
+    it "should include structuredContent using outputShape-derived outputSchema", ->
+      response = server\handle_tools_call {
+        jsonrpc: "2.0"
+        id: 13
+        method: "tools/call"
+        params: {
+          name: "get-file-metadata"
+          arguments: {}
+        }
+      }
+
+      assert.is_false response.result.isError
+      assert.same {
+        object_id: 42
+        path: "posts/hello-world"
+      }, response.result.structuredContent
 
   describe "hidden tools", ->
     local server
