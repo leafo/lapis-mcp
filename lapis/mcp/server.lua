@@ -894,7 +894,8 @@ do
       outputShape = details.outputShape,
       annotations = details.annotations,
       handler = call_fn,
-      hidden = details.hidden or false
+      hidden = details.hidden or false,
+      tags = details.tags
     }
     return table.insert(rawget(self, "tools"), tool_def)
   end
@@ -902,28 +903,72 @@ do
     if opts == nil then
       opts = { }
     end
-    assert(type(other_server_class) == "table" and other_server_class.__base, "include: expected MCP server class")
+    if type(other_server_class) == "string" then
+      other_server_class = require(other_server_class)
+    end
+    local subclass_of
+    subclass_of = require("tableshape.moonscript").subclass_of
+    assert(subclass_of(McpServer):describe("include: expected subclass of McpServer")(other_server_class))
     local prefix = opts.prefix or ""
     assert(type(prefix) == "string", "include: prefix must be a string")
     local target_name = self.server_name or self.__name or "McpServer"
     local source_name = other_server_class.server_name or other_server_class.__name or "McpServer"
     for original_name, tool in pairs(collect_all_tools(other_server_class)) do
-      local final_name = prefix .. original_name
-      if tool_exists_in_chain(self, final_name) then
-        error("include collision on " .. tostring(target_name) .. ": source " .. tostring(source_name) .. " tool " .. tostring(original_name) .. " maps to existing tool " .. tostring(final_name))
+      local _continue_0 = false
+      repeat
+        local final_name = prefix .. original_name
+        if opts.tags then
+          local tool_tags
+          if tool.tags then
+            do
+              local _tbl_0 = { }
+              local _list_0 = tool.tags
+              for _index_0 = 1, #_list_0 do
+                local t = _list_0[_index_0]
+                _tbl_0[t] = true
+              end
+              tool_tags = _tbl_0
+            end
+          end
+          if not (tool_tags) then
+            _continue_0 = true
+            break
+          end
+          local has_match = false
+          local _list_0 = opts.tags
+          for _index_0 = 1, #_list_0 do
+            local t = _list_0[_index_0]
+            if tool_tags[t] then
+              has_match = true
+              break
+            end
+          end
+          if not (has_match) then
+            _continue_0 = true
+            break
+          end
+        end
+        if tool_exists_in_chain(self, final_name) then
+          error("include collision on " .. tostring(target_name) .. ": source " .. tostring(source_name) .. " tool " .. tostring(original_name) .. " maps to existing tool " .. tostring(final_name))
+        end
+        self:add_tool({
+          name = final_name,
+          description = tool.description,
+          title = tool.title,
+          icons = clone_table(tool.icons),
+          inputSchema = clone_table(tool.inputSchema),
+          inputShape = tool.inputShape,
+          outputSchema = clone_table(tool.outputSchema),
+          outputShape = tool.outputShape,
+          annotations = clone_table(tool.annotations),
+          hidden = tool.hidden,
+          tags = tool.tags
+        }, tool.handler)
+        _continue_0 = true
+      until true
+      if not _continue_0 then
+        break
       end
-      self:add_tool({
-        name = final_name,
-        description = tool.description,
-        title = tool.title,
-        icons = clone_table(tool.icons),
-        inputSchema = clone_table(tool.inputSchema),
-        inputShape = tool.inputShape,
-        outputSchema = clone_table(tool.outputSchema),
-        outputShape = tool.outputShape,
-        annotations = clone_table(tool.annotations),
-        hidden = tool.hidden
-      }, tool.handler)
     end
     return self
   end

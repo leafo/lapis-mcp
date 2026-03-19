@@ -460,6 +460,81 @@ describe "McpServer", ->
       assert.is_false success
       assert.truthy err\match "include collision"
 
+    it "should filter included tools by tags", ->
+      class SharedServer extends McpServer
+        @add_tool {
+          name: "read-file"
+          description: "Read a file"
+          inputSchema: { type: "object", properties: {}, required: {} }
+          tags: {"read"}
+        }, -> "read-file result"
+
+        @add_tool {
+          name: "list-files"
+          description: "List files"
+          inputSchema: { type: "object", properties: {}, required: {} }
+          tags: {"read"}
+        }, -> "list-files result"
+
+        @add_tool {
+          name: "write-file"
+          description: "Write a file"
+          inputSchema: { type: "object", properties: {}, required: {} }
+          tags: {"write"}
+        }, -> "write-file result"
+
+      class CombinedServer extends McpServer
+        @include SharedServer, tags: {"read"}
+
+      server = CombinedServer!
+      assert.is_not_nil server\find_tool "read-file"
+      assert.is_not_nil server\find_tool "list-files"
+      assert.is_nil server\find_tool "write-file"
+
+    it "should skip untagged tools when tags filter is set", ->
+      class SharedServer extends McpServer
+        @add_tool {
+          name: "tagged-tool"
+          description: "Tagged tool"
+          inputSchema: { type: "object", properties: {}, required: {} }
+          tags: {"read"}
+        }, -> "tagged result"
+
+        @add_tool {
+          name: "untagged-tool"
+          description: "Untagged tool"
+          inputSchema: { type: "object", properties: {}, required: {} }
+        }, -> "untagged result"
+
+      class CombinedServer extends McpServer
+        @include SharedServer, tags: {"read"}
+
+      server = CombinedServer!
+      assert.is_not_nil server\find_tool "tagged-tool"
+      assert.is_nil server\find_tool "untagged-tool"
+
+    it "should include all tools when no tags filter is set", ->
+      class SharedServer extends McpServer
+        @add_tool {
+          name: "tagged-tool"
+          description: "Tagged tool"
+          inputSchema: { type: "object", properties: {}, required: {} }
+          tags: {"read"}
+        }, -> "tagged result"
+
+        @add_tool {
+          name: "untagged-tool"
+          description: "Untagged tool"
+          inputSchema: { type: "object", properties: {}, required: {} }
+        }, -> "untagged result"
+
+      class CombinedServer extends McpServer
+        @include SharedServer
+
+      server = CombinedServer!
+      assert.is_not_nil server\find_tool "tagged-tool"
+      assert.is_not_nil server\find_tool "untagged-tool"
+
   describe "server capabilities", ->
     it "should include listChanged in initialization response", ->
       test_server = McpServer!

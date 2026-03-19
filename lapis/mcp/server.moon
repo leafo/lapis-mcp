@@ -182,12 +182,17 @@ class McpServer
       annotations: details.annotations
       handler: call_fn
       hidden: details.hidden or false
+      tags: details.tags
     }
 
     table.insert(rawget(@, "tools"), tool_def)
 
   @include: (other_server_class, opts={}) =>
-    assert type(other_server_class) == "table" and other_server_class.__base, "include: expected MCP server class"
+    if type(other_server_class) == "string"
+      other_server_class = require other_server_class
+
+    import subclass_of from require "tableshape.moonscript"
+    assert subclass_of(McpServer)\describe("include: expected subclass of McpServer") other_server_class
 
     prefix = opts.prefix or ""
     assert type(prefix) == "string", "include: prefix must be a string"
@@ -197,6 +202,17 @@ class McpServer
 
     for original_name, tool in pairs collect_all_tools other_server_class
       final_name = prefix .. original_name
+
+      if opts.tags
+        tool_tags = if tool.tags
+          {t, true for t in *tool.tags}
+        continue unless tool_tags
+        has_match = false
+        for t in *opts.tags
+          if tool_tags[t]
+            has_match = true
+            break
+        continue unless has_match
 
       if tool_exists_in_chain @, final_name
         error "include collision on #{target_name}: source #{source_name} tool #{original_name} maps to existing tool #{final_name}"
@@ -212,6 +228,7 @@ class McpServer
         outputShape: tool.outputShape
         annotations: clone_table tool.annotations
         hidden: tool.hidden
+        tags: tool.tags
       }, tool.handler
 
     @
