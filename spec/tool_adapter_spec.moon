@@ -1150,6 +1150,55 @@ describe "GeminiToolAdapter", ->
 
       assert.same "Expected functionCall args to be an object", messages[2].parts[1].functionResponse.response.error
 
+  describe "tableshape to Gemini", ->
+    types = require "lapis.validate.types"
+
+    it "should convert inputShape to valid Gemini tool declaration", ->
+      class TestServer extends McpServer
+        @add_tool {
+          name: "update-profile"
+          description: "Update a user profile"
+          inputShape: types.shape {
+            user_id: types.db_id
+            display_name: types.limited_text 100
+            tags: types.array_of types.limited_text 50
+          }
+        }, (params) => params
+
+      tool_interface = GeminiToolAdapter(TestServer!)
+      gemini_tools = tool_interface\to_tools!
+
+      assert.same {
+        {
+          functionDeclarations: {
+            {
+              name: "update-profile"
+              description: "Update a user profile"
+              parameters: {
+                type: "OBJECT"
+                properties: {
+                  user_id: {
+                    type: "NUMBER"
+                    description: "database ID integer"
+                  }
+                  display_name: {
+                    type: "STRING"
+                    description: "text between 1 and 100 characters"
+                  }
+                  tags: {
+                    type: "ARRAY"
+                    items: {
+                      type: "STRING"
+                    }
+                  }
+                }
+                required: {"display_name", "tags", "user_id"}
+              }
+            }
+          }
+        }
+      }, gemini_tools
+
 describe "complex realistic scenarios", ->
   local server, tool_interface_openai, tool_interface_anthropic, tool_interface_gemini
 

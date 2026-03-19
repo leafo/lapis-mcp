@@ -26,32 +26,39 @@ do
       end
       local normalized = { }
       for key, value in pairs(schema) do
-        if key == "type" then
+        local _exp_0 = key
+        if "type" == _exp_0 then
           normalized.type = self:normalize_schema_type(value)
-        elseif key == "properties" and type(value) == "table" then
-          local properties = { }
-          for property_name, property_schema in pairs(value) do
-            properties[property_name] = self:normalize_schema_node(property_schema)
-          end
-          normalized.properties = properties
-        elseif key == "items" and type(value) == "table" then
-          normalized.items = self:normalize_schema_node(value)
-        elseif key == "anyOf" and type(value) == "table" then
-          do
-            local _accum_0 = { }
-            local _len_0 = 1
-            for _index_0 = 1, #value do
-              local option_schema = value[_index_0]
-              _accum_0[_len_0] = self:normalize_schema_node(option_schema)
-              _len_0 = _len_0 + 1
+        elseif "properties" == _exp_0 then
+          if type(value) == "table" then
+            local properties = { }
+            for property_name, property_schema in pairs(value) do
+              properties[property_name] = self:normalize_schema_node(property_schema)
             end
-            normalized.anyOf = _accum_0
+            normalized.properties = properties
           end
-        elseif key == "required" and type(value) == "table" then
-          if #value > 0 then
+        elseif "items" == _exp_0 then
+          if type(value) == "table" then
+            normalized.items = self:normalize_schema_node(value)
+          end
+        elseif "anyOf" == _exp_0 then
+          if type(value) == "table" then
+            do
+              local _accum_0 = { }
+              local _len_0 = 1
+              for _index_0 = 1, #value do
+                local option_schema = value[_index_0]
+                _accum_0[_len_0] = self:normalize_schema_node(option_schema)
+                _len_0 = _len_0 + 1
+              end
+              normalized.anyOf = _accum_0
+            end
+          end
+        elseif "required" == _exp_0 then
+          if type(value) == "table" and #value > 0 then
             normalized.required = value
           end
-        else
+        elseif "description" == _exp_0 or "enum" == _exp_0 or "format" == _exp_0 or "nullable" == _exp_0 or "title" == _exp_0 or "minimum" == _exp_0 or "maximum" == _exp_0 or "minItems" == _exp_0 or "maxItems" == _exp_0 or "minProperties" == _exp_0 or "maxProperties" == _exp_0 or "minLength" == _exp_0 or "maxLength" == _exp_0 or "pattern" == _exp_0 or "example" == _exp_0 or "propertyOrdering" == _exp_0 or "default" == _exp_0 then
           normalized[key] = value
         end
       end

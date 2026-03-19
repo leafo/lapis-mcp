@@ -26,22 +26,26 @@ class GeminiToolAdapter extends ToolAdapter
     normalized = {}
 
     for key, value in pairs schema
-      if key == "type"
-        normalized.type = @normalize_schema_type value
-      elseif key == "properties" and type(value) == "table"
-        properties = {}
-        for property_name, property_schema in pairs value
-          properties[property_name] = @normalize_schema_node property_schema
-        normalized.properties = properties
-      elseif key == "items" and type(value) == "table"
-        normalized.items = @normalize_schema_node value
-      elseif key == "anyOf" and type(value) == "table"
-        normalized.anyOf = [@normalize_schema_node option_schema for option_schema in *value]
-      elseif key == "required" and type(value) == "table"
-        if #value > 0
-          normalized.required = value
-      else
-        normalized[key] = value
+      switch key
+        when "type"
+          normalized.type = @normalize_schema_type value
+        when "properties"
+          if type(value) == "table"
+            properties = {}
+            for property_name, property_schema in pairs value
+              properties[property_name] = @normalize_schema_node property_schema
+            normalized.properties = properties
+        when "items"
+          if type(value) == "table"
+            normalized.items = @normalize_schema_node value
+        when "anyOf"
+          if type(value) == "table"
+            normalized.anyOf = [@normalize_schema_node option_schema for option_schema in *value]
+        when "required"
+          if type(value) == "table" and #value > 0
+            normalized.required = value
+        when "description", "enum", "format", "nullable", "title", "minimum", "maximum", "minItems", "maxItems", "minProperties", "maxProperties", "minLength", "maxLength", "pattern", "example", "propertyOrdering", "default"
+          normalized[key] = value
 
     normalized
 
