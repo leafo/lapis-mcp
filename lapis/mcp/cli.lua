@@ -3,7 +3,7 @@ local CLIENT_NAME = "lapis-mcp-cli"
 local add_shared_arguments
 add_shared_arguments = function(parser)
   parser:option("--send-message", "Send a raw message by name and exit (e.g. tools/list, resources/list, initialize or a JSON object)")
-  parser:option("--dump-tools", "Output tool specification as LLM API compatible object"):choices({
+  parser:option("--dump-tools --tool-schema", "Output tool specification as LLM API compatible object (use with --tool to show a single tool)"):choices({
     "openai",
     "anthropic",
     "gemini"
