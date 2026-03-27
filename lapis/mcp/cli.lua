@@ -37,7 +37,16 @@ run_parsed_args = function(server, args)
   if args.dump_tools then
     local adapter_class = require("lapis.mcp.tool_adapter." .. tostring(args.dump_tools))
     local adapter = adapter_class(server)
-    print(json.encode(adapter:to_tools()))
+    if args.tool then
+      local tool = server:find_tool(args.tool)
+      if not (tool) then
+        io.stderr:write("Error: tool '" .. tostring(args.tool) .. "' not found\n")
+        os.exit(1)
+      end
+      print(json.encode(adapter:convert_tool(tool)))
+    else
+      print(json.encode(adapter:to_tools()))
+    end
     return 
   end
   if args.tool then

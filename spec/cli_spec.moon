@@ -113,17 +113,30 @@ describe "run_cli", ->
     assert.is_true tool_names["visible-tool-2"]
     assert.is_nil tool_names["hidden-tool"]
 
-  it "uses dump-tools branch precedence over later one-shot flags", ->
+  it "dumps single OpenAI tool when --tool is combined with --dump-tools", ->
     ok, result, printed = run_cli_capture TestServer, {
       "--dump-tools", "openai"
       "--tool", "visible-tool-1"
-      "--arg", '{"name":"world"}'
     }
 
     assert.is_true ok
     assert.is_nil result
     assert.equal 1, #printed
 
-    tools = assert json.decode printed[1]
-    assert.equal 2, #tools
-    assert.equal "function", tools[1].type
+    tool = assert json.decode printed[1]
+    assert.equal "function", tool.type
+    assert.equal "visible-tool-1", tool.function.name
+
+  it "dumps single Anthropic tool when --tool is combined with --dump-tools", ->
+    ok, result, printed = run_cli_capture TestServer, {
+      "--dump-tools", "anthropic"
+      "--tool", "visible-tool-2"
+    }
+
+    assert.is_true ok
+    assert.is_nil result
+    assert.equal 1, #printed
+
+    tool = assert json.decode printed[1]
+    assert.equal "visible-tool-2", tool.name
+    assert.is_table tool.input_schema

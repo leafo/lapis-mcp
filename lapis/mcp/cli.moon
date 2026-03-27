@@ -38,7 +38,14 @@ run_parsed_args = (server, args) ->
   if args.dump_tools
     adapter_class = require "lapis.mcp.tool_adapter.#{args.dump_tools}"
     adapter = adapter_class server
-    print json.encode adapter\to_tools!
+    if args.tool
+      tool = server\find_tool args.tool
+      unless tool
+        io.stderr\write "Error: tool '#{args.tool}' not found\n"
+        os.exit 1
+      print json.encode adapter\convert_tool tool
+    else
+      print json.encode adapter\to_tools!
     return
 
   -- --tool immediate invocation
