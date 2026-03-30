@@ -28,6 +28,7 @@ build = {
     ["lapis.cmd.actions.mcp"] = "lapis/cmd/actions/mcp.lua",
     ["lapis.mcp.cli"] = "lapis/mcp/cli.lua",
     ["lapis.mcp.lapis_server"] = "lapis/mcp/lapis_server.lua",
+    ["lapis.mcp.http"] = "lapis/mcp/http.lua",
     ["lapis.mcp.server"] = "lapis/mcp/server.lua",
     ["lapis.mcp.tool_adapter"] = "lapis/mcp/tool_adapter.lua",
     ["lapis.mcp.tool_adapter.anthropic"] = "lapis/mcp/tool_adapter/anthropic.lua",

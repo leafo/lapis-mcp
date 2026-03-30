@@ -531,10 +531,15 @@ errors. They still fail fast so the tool implementation can be fixed.
 
 ### Running Your Server
 
-This library currently only supports stdio transport (but with plans to support more). There are two interfaces to starting the server:
+This library supports two transport styles today:
+
+- stdio, by running the server loop directly
+- HTTP, by mounting an MCP route in a Lapis application
+
+For stdio transport there are two interfaces to starting the server:
 
 - `mcp_server:run_stdio()` - Instance method that immediately starts the server loop over stdin and writes to stdout. Input must follow the MCP protocol to be handled correctly.
-- `McpServer:run_cli()` - Class method that will instantiate your MCP server with argparse based configuration and debug tools, then immediately starts the stdio loop via `run_stdio`. In the future this will also support enabling other transport modes, so if you want general purpose CLI for starting your MCP server then I recommend this. Use the `--help` command to learn more about what's available.
+- `McpServer:run_cli()` - Class method that will instantiate your MCP server with argparse based configuration and debug tools, then immediately starts the stdio loop via `run_stdio`. Use the `--help` command to learn more about what's available.
 
 #### Programatic Execution
 
@@ -614,6 +619,94 @@ When using `run_cli` in a script called `my_server.lua` the following are exampl
 # Send a custom JSON message
 ./my_server.lua --send-message '{"jsonrpc":"2.0","id":"test","method":"tools/call","params":{"name":"hello","arguments":{"name":"World"}}}'
 ```
+
+### Running Over HTTP
+
+Use `lapis.mcp.http.mcp_handler` to mount an MCP endpoint in a Lapis
+application. The handler creates a fresh `McpServer` instance for each request,
+so HTTP mode is stateless unless you restore state yourself.
+
+#### Lua
+
+```lua
+local lapis = require("lapis")
+local McpServer = require("lapis.mcp.server").McpServer
+local mcp_handler = require("lapis.mcp.http").mcp_handler
+
+local MyMcpServer = McpServer:extend("MyMcpServer", {
+  server_name = "my-http-server"
+})
+
+MyMcpServer:add_tool({
+  name = "hello",
+  description = "Returns a greeting",
+  inputSchema = {
+    type = "object",
+    properties = {},
+    required = {}
+  }
+}, function(self, params)
+  return "world"
+end)
+
+local app = lapis.Application()
+
+app:match("/mcp", mcp_handler(MyMcpServer, {
+  allowed_origins = {
+    "https://example.com"
+  }
+}))
+
+return app
+```
+
+#### MoonScript
+
+```moonscript
+lapis = require "lapis"
+
+import McpServer from require "lapis.mcp.server"
+import mcp_handler from require "lapis.mcp.http"
+
+class MyMcpServer extends McpServer
+  @server_name: "my-http-server"
+
+  @add_tool {
+    name: "hello"
+    description: "Returns a greeting"
+    inputSchema: {
+      type: "object"
+      properties: {}
+      required: {}
+    }
+  }, (params) =>
+    "world"
+
+class App extends lapis.Application
+  "/mcp": mcp_handler MyMcpServer, {
+    allowed_origins: {
+      "https://example.com"
+    }
+  }
+```
+
+HTTP mode accepts `POST` requests for MCP messages and `OPTIONS` requests for
+CORS preflight. Clients should send an `Accept` header that includes both
+`application/json` and `text/event-stream`.
+
+#### HTTP Handler Options
+
+The second argument to `mcp_handler(ServerClass, opts)` accepts these options:
+
+- `allowed_origins` - Either `"*"` or an array of allowed origins. If an `Origin` header is present and not allowed, the handler returns `403`.
+- `server_options` - Passed to `ServerClass(...)` each time a request creates a new server instance.
+- `load_session(req, server)` - Optional callback invoked after the server instance is created. Use this to restore per-session state, customize visibility, or apply authentication-derived state to the server.
+- `create_session_id(req, server)` - Optional callback invoked for `initialize` requests. If it returns a value, it is written to the `Mcp-Session-Id` response header.
+
+Because HTTP mode is stateless, any authentication or session persistence is up
+to the surrounding Lapis application and these callbacks. For example, you can
+perform your own auth checks before the route runs, then use `load_session` to
+restore the server state associated with the current request.
 
 ## License
 
