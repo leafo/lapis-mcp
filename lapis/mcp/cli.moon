@@ -14,6 +14,8 @@ add_shared_arguments = (parser) ->
   parser\option "--tool-argument --arg", "Argument object to pass for tool call (in JSON format)"
   parser\option "--resource", "Immediately fetch a resource by URI, print output and exit"
   parser\option("--tag", "Only expose tools matching this tag (can be specified multiple times)")\count("*")
+  parser\option "--tool-prefix", "Prefix to prepend to all tool names"
+  parser\option "--instructions", "Set the server instructions"
   parser\flag "--debug", "Enable debug logging to stderr"
   parser\flag "--skip-initialize --skip-init", "Skip the initialize stage and listen for messages immediately"
   parser
@@ -31,6 +33,13 @@ build_parser = (config={}) ->
   parser
 
 run_parsed_args = (server, args) ->
+
+  if args.tool_prefix
+    for _, tool in pairs server\get_all_tools!
+      tool.name = args.tool_prefix .. tool.name
+
+  if args.instructions
+    server.__class.instructions = args.instructions
 
   if args.tag and #args.tag > 0
     server\set_visibility_by_tags args.tag

@@ -592,6 +592,8 @@ The `run_cli` method provides several useful command-line options. You can view 
 - `--tool <tool_name>` - Immediately invoke a specific tool, print output and exit
 - `--tool-argument <json>` / `--arg <json>` - Pass arguments to the tool (in JSON format)
 - `--send-message <message>` - Send a raw message and exit
+- `--tool-prefix <prefix>` - Prefix to prepend to all tool names
+- `--instructions <text>` - Set the server instructions
 
 #### CLI Examples
 
