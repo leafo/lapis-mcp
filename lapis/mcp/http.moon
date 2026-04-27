@@ -147,4 +147,15 @@ mcp_handler = (ServerClass, opts={}) ->
       status: 405, layout: false
   }
 
-{:mcp_handler, :HttpNoopTransport}
+serve = (server_module, opts={}) ->
+  ServerClass = if type(server_module) == "string"
+    require server_module
+  else
+    server_module
+
+  lapis = require "lapis"
+  app = lapis.Application!
+  app\match opts.path or "/", mcp_handler ServerClass, opts
+  lapis.serve app
+
+{:mcp_handler, :HttpNoopTransport, :serve}

@@ -218,7 +218,24 @@ mcp_handler = function(ServerClass, opts)
     end
   })
 end
+local serve
+serve = function(server_module, opts)
+  if opts == nil then
+    opts = { }
+  end
+  local ServerClass
+  if type(server_module) == "string" then
+    ServerClass = require(server_module)
+  else
+    ServerClass = server_module
+  end
+  local lapis = require("lapis")
+  local app = lapis.Application()
+  app:match(opts.path or "/", mcp_handler(ServerClass, opts))
+  return lapis.serve(app)
+end
 return {
   mcp_handler = mcp_handler,
-  HttpNoopTransport = HttpNoopTransport
+  HttpNoopTransport = HttpNoopTransport,
+  serve = serve
 }

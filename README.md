@@ -16,7 +16,7 @@ This library provides a `lapis` subcommand, `mcp`, which can be used to start
 an MCP server tied to the Lapis application in the current directory.
 
 ```
-lapis _ mcp
+lapis mcp
 ```
 
 ### Available Tools
@@ -709,6 +709,42 @@ Because HTTP mode is stateless, any authentication or session persistence is up
 to the surrounding Lapis application and these callbacks. For example, you can
 perform your own auth checks before the route runs, then use `load_session` to
 restore the server state associated with the current request.
+
+#### HTTP serve
+
+For the common case of serving a single MCP server class as a standalone Lapis
+app, `lapis.mcp.http` provides a `serve(server_module, opts)` helper that
+mirrors `lapis.serve`.
+
+`server_module` is either a Lua module name that returns an MCP server class or
+the class itself. The helper builds an anonymous Lapis application, mounts
+`mcp_handler(ServerClass, opts)` at `opts.path` (default `"/"`), and hands the
+app off to `lapis.serve`. Any other keys in `opts` (`allowed_origins`,
+`server_options`, `load_session`, `create_session_id`) are forwarded to
+`mcp_handler`.
+
+
+With OpenResty: 
+
+```nginx
+location / {
+  content_by_lua_block {
+    require("lapis.mcp.http").serve("my.mcp.server")
+  }
+}
+```
+
+With golapis:
+
+```sh
+golapis --http -e 'require("lapis.mcp.http").serve("my.mcp.server")' --ngx
+```
+
+The MCP handler internally validates `Origin` and `Accept` headers and only
+responds to `POST` (plus `OPTIONS` for CORS preflight), so it is safe to mount
+at the root of a location block. If you would rather expose it under a path,
+move the location (`location /mcp { ... }`) or pass `{path = "/mcp"}` to
+`serve` and front it with a broader `location /`.
 
 ## License
 
