@@ -1,4 +1,5 @@
 json = require "cjson.safe"
+oauth_shim = require "lapis.mcp.oauth"
 
 import respond_to from require "lapis.application"
 
@@ -27,8 +28,8 @@ build_cors_headers = (origin, allowed_origin) ->
   {
     ["Access-Control-Allow-Origin"]: allowed_origin
     ["Access-Control-Allow-Methods"]: "POST, OPTIONS"
-    ["Access-Control-Allow-Headers"]: "Content-Type, Accept, Mcp-Session-Id"
-    ["Access-Control-Expose-Headers"]: "Mcp-Session-Id"
+    ["Access-Control-Allow-Headers"]: "Content-Type, Accept, Mcp-Session-Id, Authorization"
+    ["Access-Control-Expose-Headers"]: "Mcp-Session-Id, WWW-Authenticate"
     ["Vary"]: "Origin"
   }
 
@@ -43,6 +44,8 @@ merge_headers = (base, extra) ->
   out
 
 mcp_handler = (ServerClass, opts={}) ->
+  oauth = opts.oauth
+
   respond_to {
     before: =>
       origin = @req.headers["origin"]
@@ -58,6 +61,19 @@ mcp_handler = (ServerClass, opts={}) ->
           }
           return
         @cors_headers = build_cors_headers origin, allowed_origin
+
+      if oauth and @req.cmd_mth != "OPTIONS"
+        unless oauth_shim.verify_bearer_token oauth, @req.headers["authorization"]
+          base = oauth.resource or oauth_shim.build_base_url @req
+          metadata_url = "#{base}/.well-known/oauth-protected-resource"
+          @write {
+            json: {error: "unauthorized"}
+            status: 401
+            headers: merge_headers @cors_headers, {
+              ["WWW-Authenticate"]: "Bearer realm=\"mcp\", resource_metadata=\"#{metadata_url}\""
+            }
+          }
+          return
 
       -- Create fresh server instance for this request
       server = ServerClass opts.server_options or {}
@@ -154,7 +170,12 @@ serve = (server_module, opts={}) ->
     server_module
 
   lapis = require "lapis"
+
   app = lapis.Application!
+
+  if opts.oauth
+    oauth_shim.register_routes app, opts.oauth
+
   app\match opts.path or "/", mcp_handler ServerClass, opts
   lapis.serve app
 

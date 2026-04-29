@@ -1,4 +1,5 @@
 local json = require("cjson.safe")
+local oauth_shim = require("lapis.mcp.oauth")
 local respond_to
 respond_to = require("lapis.application").respond_to
 local HttpNoopTransport
@@ -52,8 +53,8 @@ build_cors_headers = function(origin, allowed_origin)
   return {
     ["Access-Control-Allow-Origin"] = allowed_origin,
     ["Access-Control-Allow-Methods"] = "POST, OPTIONS",
-    ["Access-Control-Allow-Headers"] = "Content-Type, Accept, Mcp-Session-Id",
-    ["Access-Control-Expose-Headers"] = "Mcp-Session-Id",
+    ["Access-Control-Allow-Headers"] = "Content-Type, Accept, Mcp-Session-Id, Authorization",
+    ["Access-Control-Expose-Headers"] = "Mcp-Session-Id, WWW-Authenticate",
     ["Vary"] = "Origin"
   }
 end
@@ -83,6 +84,7 @@ mcp_handler = function(ServerClass, opts)
   if opts == nil then
     opts = { }
   end
+  local oauth = opts.oauth
   return respond_to({
     before = function(self)
       local origin = self.req.headers["origin"]
@@ -101,6 +103,22 @@ mcp_handler = function(ServerClass, opts)
           return 
         end
         self.cors_headers = build_cors_headers(origin, allowed_origin)
+      end
+      if oauth and self.req.cmd_mth ~= "OPTIONS" then
+        if not (oauth_shim.verify_bearer_token(oauth, self.req.headers["authorization"])) then
+          local base = oauth.resource or oauth_shim.build_base_url(self.req)
+          local metadata_url = tostring(base) .. "/.well-known/oauth-protected-resource"
+          self:write({
+            json = {
+              error = "unauthorized"
+            },
+            status = 401,
+            headers = merge_headers(self.cors_headers, {
+              ["WWW-Authenticate"] = "Bearer realm=\"mcp\", resource_metadata=\"" .. tostring(metadata_url) .. "\""
+            })
+          })
+          return 
+        end
       end
       local server = ServerClass(opts.server_options or { })
       server:skip_initialize()
@@ -231,6 +249,9 @@ serve = function(server_module, opts)
   end
   local lapis = require("lapis")
   local app = lapis.Application()
+  if opts.oauth then
+    oauth_shim.register_routes(app, opts.oauth)
+  end
   app:match(opts.path or "/", mcp_handler(ServerClass, opts))
   return lapis.serve(app)
 end

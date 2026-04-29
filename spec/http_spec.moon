@@ -247,7 +247,7 @@ describe "mcp_handler", ->
       assert.equal 200, status
       assert.equal "*", headers["access_control_allow_origin"]
       assert.equal "Origin", headers["vary"]
-      assert.equal "Mcp-Session-Id", headers["access_control_expose_headers"]
+      assert.equal "Mcp-Session-Id, WWW-Authenticate", headers["access_control_expose_headers"]
 
     it "allows listed origin", ->
       app = build_app allowed_origins: {"https://good.com"}
@@ -263,7 +263,7 @@ describe "mcp_handler", ->
       assert.equal 200, status
       assert.equal "https://good.com", headers["access_control_allow_origin"]
       assert.equal "POST, OPTIONS", headers["access_control_allow_methods"]
-      assert.equal "Content-Type, Accept, Mcp-Session-Id", headers["access_control_allow_headers"]
+      assert.equal "Content-Type, Accept, Mcp-Session-Id, Authorization", headers["access_control_allow_headers"]
 
     it "rejects unlisted origin", ->
       app = build_app allowed_origins: {"https://good.com"}
@@ -293,8 +293,8 @@ describe "mcp_handler", ->
       assert.equal 204, status
       assert.equal "https://good.com", headers["access_control_allow_origin"]
       assert.equal "POST, OPTIONS", headers["access_control_allow_methods"]
-      assert.equal "Content-Type, Accept, Mcp-Session-Id", headers["access_control_allow_headers"]
-      assert.equal "Mcp-Session-Id", headers["access_control_expose_headers"]
+      assert.equal "Content-Type, Accept, Mcp-Session-Id, Authorization", headers["access_control_allow_headers"]
+      assert.equal "Mcp-Session-Id, WWW-Authenticate", headers["access_control_expose_headers"]
 
     it "rejects CORS preflight for disallowed origin", ->
       app = build_app allowed_origins: {"https://good.com"}

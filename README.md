@@ -746,6 +746,69 @@ at the root of a location block. If you would rather expose it under a path,
 move the location (`location /mcp { ... }`) or pass `{path = "/mcp"}` to
 `serve` and front it with a broader `location /`.
 
+#### Authenticating with OAuth (Service Tokens)
+
+To make a remote MCP server compatible with Claude.ai's custom connectors (or
+any client that expects OAuth-protected MCP endpoints), `serve` can install a
+minimal OAuth shim that gates access behind a static service token. There is
+no real login flow — the shim just satisfies the OAuth protocol surface so the
+client can complete an authorization round-trip and obtain a bearer token.
+
+When `opts.oauth` is set, `serve` registers these routes alongside the MCP
+endpoint:
+
+- `GET /.well-known/oauth-protected-resource` (RFC 9728)
+- `GET /.well-known/oauth-authorization-server` (RFC 8414)
+- `GET /oauth/authorize`
+- `POST /oauth/token`
+
+The MCP endpoint requires `Authorization: Bearer <token>` and returns 401 with
+a `WWW-Authenticate` header pointing at the resource metadata when missing or
+invalid. Clients discover the authorization server, run the
+`authorization_code` flow with PKCE (auto-approved with no UI), and exchange
+the resulting code for an access token at `/oauth/token`. The
+`client_credentials` grant is also supported. Auth codes are stateless
+HMAC-signed payloads using `client_secret`, so no storage is required between
+the `/authorize` and `/token` requests.
+
+```nginx
+location / {
+  content_by_lua_block {
+    require("lapis.mcp.http").serve("my.mcp.server", {
+      oauth = {
+        client_id = "claude-connector",
+        client_secret = "your-shared-secret"
+        -- access_token = "...",                  -- defaults to client_secret
+        -- access_token_ttl = 3600,
+        -- issuer = "https://you.example.com",   -- derived from request if omitted
+      }
+    })
+  }
+}
+```
+
+In Claude's "Add custom connector" dialog, paste your server URL into
+"Remote MCP server URL", expand "Advanced settings", and enter the same values
+for "OAuth Client ID" and "OAuth Client Secret". The shim issues the
+configured `access_token` to Claude, which sends it back as
+`Authorization: Bearer ...` on every MCP request.
+
+##### OAuth Options
+
+- `client_id` (required) — must match what the client sends.
+- `client_secret` (required) — verified at the token endpoint and used as the HMAC key for stateless auth codes.
+- `access_token` (optional) — the bearer token returned to the client and accepted on the MCP endpoint. Defaults to `client_secret`.
+- `access_token_ttl` (optional) — `expires_in` returned at the token endpoint. Defaults to `3600`.
+- `issuer` (optional) — issuer URL exposed in the metadata documents. Derived from the request `Host` (and `X-Forwarded-Proto`/`X-Forwarded-Host`) when omitted.
+- `resource` (optional) — resource URL exposed in the protected-resource metadata. Defaults to the issuer.
+
+Because this is a service-token shim and not real user authentication, anyone
+with the configured `client_secret` (or `access_token`) can call the MCP
+server. Always serve over HTTPS, treat the secret like an API key, and rotate
+by updating the `oauth` table and restarting. If you need real user identity
+or per-user scopes, delegate to a proper authorization server instead of using
+this shim.
+
 ## License
 
 MIT
