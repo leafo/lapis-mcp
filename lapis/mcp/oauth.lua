@@ -1,13 +1,16 @@
 local json = require("cjson.safe")
 local respond_to
 respond_to = require("lapis.application").respond_to
-local encode_with_secret, decode_with_secret
+local encode_with_secret, decode_with_secret, decode_base64
 do
   local _obj_0 = require("lapis.util.encoding")
-  encode_with_secret, decode_with_secret = _obj_0.encode_with_secret, _obj_0.decode_with_secret
+  encode_with_secret, decode_with_secret, decode_base64 = _obj_0.encode_with_secret, _obj_0.decode_with_secret, _obj_0.decode_base64
 end
-local encode_query_string
-encode_query_string = require("lapis.util").encode_query_string
+local encode_query_string, unescape
+do
+  local _obj_0 = require("lapis.util")
+  encode_query_string, unescape = _obj_0.encode_query_string, _obj_0.unescape
+end
 local build_base_url
 build_base_url = function(req)
   local scheme = req.headers["x-forwarded-proto"] or (req.parsed_url and req.parsed_url.scheme) or "http"
@@ -127,8 +130,7 @@ authorization_server_handler = function(oauth)
         }, json.array_mt),
         token_endpoint_auth_methods_supported = setmetatable({
           "client_secret_post",
-          "client_secret_basic",
-          "none"
+          "client_secret_basic"
         }, json.array_mt)
       },
       headers = {
@@ -193,6 +195,10 @@ authorize_handler = function(oauth)
       }
     end
   })
+end
+local decode_basic_part
+decode_basic_part = function(part)
+  return unescape(part:gsub("%+", " "))
 end
 local token_handler
 token_handler = function(oauth)
@@ -266,14 +272,14 @@ token_handler = function(oauth)
       if auth_header then
         local basic_creds = auth_header:match("^[Bb]asic (.+)$")
         if basic_creds then
-          local decoded = ngx.decode_base64(basic_creds)
+          local decoded = decode_base64(basic_creds)
           if decoded then
             local cid, csec = decoded:match("^([^:]*):(.*)$")
             if cid then
-              client_id = cid
+              client_id = decode_basic_part(cid)
             end
             if csec then
-              client_secret = csec
+              client_secret = decode_basic_part(csec)
             end
           end
         end

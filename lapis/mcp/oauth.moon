@@ -8,8 +8,8 @@
 json = require "cjson.safe"
 
 import respond_to from require "lapis.application"
-import encode_with_secret, decode_with_secret from require "lapis.util.encoding"
-import encode_query_string from require "lapis.util"
+import encode_with_secret, decode_with_secret, decode_base64 from require "lapis.util.encoding"
+import encode_query_string, unescape from require "lapis.util"
 
 build_base_url = (req) ->
   scheme = req.headers["x-forwarded-proto"] or (req.parsed_url and req.parsed_url.scheme) or "http"
@@ -91,7 +91,7 @@ authorization_server_handler = (oauth) ->
         response_types_supported: setmetatable {"code"}, json.array_mt
         grant_types_supported: setmetatable {"authorization_code", "client_credentials"}, json.array_mt
         code_challenge_methods_supported: setmetatable {"S256", "plain"}, json.array_mt
-        token_endpoint_auth_methods_supported: setmetatable {"client_secret_post", "client_secret_basic", "none"}, json.array_mt
+        token_endpoint_auth_methods_supported: setmetatable {"client_secret_post", "client_secret_basic"}, json.array_mt
       }
       headers: {
         ["Cache-Control"]: "public, max-age=3600"
@@ -135,6 +135,9 @@ authorize_handler = (oauth) ->
         redirect_to: redirect_uri .. sep .. encode_query_string qs_params
       }
   }
+
+decode_basic_part = (part) ->
+  unescape part\gsub "%+", " "
 
 token_handler = (oauth) ->
   cors_headers = {
@@ -187,11 +190,11 @@ token_handler = (oauth) ->
       if auth_header
         basic_creds = auth_header\match "^[Bb]asic (.+)$"
         if basic_creds
-          decoded = ngx.decode_base64 basic_creds
+          decoded = decode_base64 basic_creds
           if decoded
             cid, csec = decoded\match "^([^:]*):(.*)$"
-            client_id = cid if cid
-            client_secret = csec if csec
+            client_id = decode_basic_part cid if cid
+            client_secret = decode_basic_part csec if csec
 
       unless client_id == oauth.client_id and client_secret == oauth.client_secret
         return error_response 401, "invalid_client"
