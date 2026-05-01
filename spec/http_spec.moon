@@ -170,42 +170,6 @@ describe "mcp_handler", ->
 
       assert.equal 406, status
 
-  describe "batch requests", ->
-    it "handles batch of requests", ->
-      app = build_app!
-      status, body = simulate_request app, "/mcp", {
-        method: "POST"
-        headers: {
-          "Accept": "application/json, text/event-stream"
-          "Content-Type": "application/json"
-        }
-        body: json.encode {
-          {jsonrpc: "2.0", id: 1, method: "tools/list"}
-          {jsonrpc: "2.0", id: 2, method: "ping"}
-        }
-      }
-
-      assert.equal 200, status
-      result = json.decode body
-      assert.equal 2, #result
-      assert.equal 1, result[1].id
-      assert.equal 2, result[2].id
-
-    it "returns 202 for batch of only notifications", ->
-      app = build_app!
-      status = simulate_request app, "/mcp", {
-        method: "POST"
-        headers: {
-          "Accept": "application/json, text/event-stream"
-          "Content-Type": "application/json"
-        }
-        body: json.encode {
-          {jsonrpc: "2.0", method: "notifications/initialized"}
-        }
-      }
-
-      assert.equal 202, status
-
   describe "origin validation", ->
     it "rejects requests with Origin header when no allowed_origins configured", ->
       app = build_app!

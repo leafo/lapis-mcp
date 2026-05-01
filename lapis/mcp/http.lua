@@ -175,51 +175,27 @@ mcp_handler = function(ServerClass, opts)
           headers = self.cors_headers
         }
       end
-      local is_batch = type(message) == "table" and message[1] ~= nil
-      if is_batch then
-        local responses = { }
-        for _index_0 = 1, #message do
-          local msg = message[_index_0]
-          local response = self.mcp_server:handle_message(msg)
-          if response then
-            table.insert(responses, response)
+      local response = self.mcp_server:handle_message(message)
+      if response then
+        local out = {
+          json = response,
+          headers = self.cors_headers
+        }
+        if message.method == "initialize" and opts.create_session_id then
+          local session_id = opts.create_session_id(self, self.mcp_server)
+          if session_id then
+            out.headers = merge_headers(out.headers, {
+              ["Mcp-Session-Id"] = session_id
+            })
           end
         end
-        if #responses == 0 then
-          return {
-            status = 202,
-            layout = false,
-            headers = self.cors_headers
-          }
-        else
-          return {
-            json = responses,
-            headers = self.cors_headers
-          }
-        end
+        return out
       else
-        local response = self.mcp_server:handle_message(message)
-        if response then
-          local out = {
-            json = response,
-            headers = self.cors_headers
-          }
-          if message.method == "initialize" and opts.create_session_id then
-            local session_id = opts.create_session_id(self, self.mcp_server)
-            if session_id then
-              out.headers = merge_headers(out.headers, {
-                ["Mcp-Session-Id"] = session_id
-              })
-            end
-          end
-          return out
-        else
-          return {
-            status = 202,
-            layout = false,
-            headers = self.cors_headers
-          }
-        end
+        return {
+          status = 202,
+          layout = false,
+          headers = self.cors_headers
+        }
       end
     end,
     GET = function(self)

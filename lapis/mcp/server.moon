@@ -58,13 +58,6 @@ class StdioTransportWithDebugLog
     io.write data .. "\n"
     io.flush!
 
-class StreamableHttpTransport
-  read_json_chunk: =>
-    error "TODO"
-
-  write_json_chunk: =>
-    error "TODO"
-
 with_initialized = (fn) ->
   (message) =>
     unless @initialized

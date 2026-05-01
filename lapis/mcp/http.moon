@@ -126,35 +126,19 @@ mcp_handler = (ServerClass, opts={}) ->
           headers: @cors_headers
         }
 
-      -- Check if batch request (JSON array)
-      is_batch = type(message) == "table" and message[1] != nil
-
-      if is_batch
-        responses = {}
-        for msg in *message
-          response = @mcp_server\handle_message msg
-          if response
-            table.insert responses, response
-
-        if #responses == 0
-          return status: 202, layout: false, headers: @cors_headers
-        else
-          return json: responses, headers: @cors_headers
-
+      response = @mcp_server\handle_message message
+      if response
+        out = {
+          json: response
+          headers: @cors_headers
+        }
+        if message.method == "initialize" and opts.create_session_id
+          session_id = opts.create_session_id @, @mcp_server
+          if session_id
+            out.headers = merge_headers out.headers, {"Mcp-Session-Id": session_id}
+        return out
       else
-        response = @mcp_server\handle_message message
-        if response
-          out = {
-            json: response
-            headers: @cors_headers
-          }
-          if message.method == "initialize" and opts.create_session_id
-            session_id = opts.create_session_id @, @mcp_server
-            if session_id
-              out.headers = merge_headers out.headers, {"Mcp-Session-Id": session_id}
-          return out
-        else
-          return status: 202, layout: false, headers: @cors_headers
+        return status: 202, layout: false, headers: @cors_headers
 
     GET: =>
       status: 405, layout: false

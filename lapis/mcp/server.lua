@@ -93,33 +93,6 @@ do
   _base_0.__class = _class_0
   StdioTransportWithDebugLog = _class_0
 end
-local StreamableHttpTransport
-do
-  local _class_0
-  local _base_0 = {
-    read_json_chunk = function(self)
-      return error("TODO")
-    end,
-    write_json_chunk = function(self)
-      return error("TODO")
-    end
-  }
-  _base_0.__index = _base_0
-  _class_0 = setmetatable({
-    __init = function() end,
-    __base = _base_0,
-    __name = "StreamableHttpTransport"
-  }, {
-    __index = _base_0,
-    __call = function(cls, ...)
-      local _self_0 = setmetatable({}, _base_0)
-      cls.__init(_self_0, ...)
-      return _self_0
-    end
-  })
-  _base_0.__class = _class_0
-  StreamableHttpTransport = _class_0
-end
 local with_initialized
 with_initialized = function(fn)
   return function(self, message)

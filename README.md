@@ -696,6 +696,13 @@ HTTP mode accepts `POST` requests for MCP messages and `OPTIONS` requests for
 CORS preflight. Clients should send an `Accept` header that includes both
 `application/json` and `text/event-stream`.
 
+This is a JSON-only profile of the Streamable HTTP transport: the server
+always responds with `application/json` and never upgrades to SSE, so
+server-initiated messages (progress notifications, sampling, etc.) are not
+delivered. `GET` and `DELETE` on the endpoint return `405`. This is
+sufficient for tool-only servers; if your tools need to stream progress
+back to the client, you'll want a fuller transport.
+
 #### HTTP Handler Options
 
 The second argument to `mcp_handler(ServerClass, opts)` accepts these options:
