@@ -64,8 +64,8 @@ verify_pkce = function(verifier, challenge, method)
   if "plain" == _exp_0 then
     return verifier == challenge
   elseif "S256" == _exp_0 then
-    local sha256 = require("resty.sha256")
-    local h = sha256()
+    local digest = require("openssl.digest")
+    local h = digest.new("sha256")
     h:update(verifier)
     return base64url_no_pad(h:final()) == challenge
   else

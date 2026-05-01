@@ -51,8 +51,8 @@ verify_pkce = (verifier, challenge, method="plain") ->
     when "plain"
       verifier == challenge
     when "S256"
-      sha256 = require "resty.sha256"
-      h = sha256!
+      digest = require "openssl.digest"
+      h = digest.new "sha256"
       h\update verifier
       base64url_no_pad(h\final!) == challenge
     else
