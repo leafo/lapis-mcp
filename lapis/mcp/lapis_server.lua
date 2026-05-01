@@ -6,7 +6,21 @@ do
   local _class_0
   local ok, pg_schema
   local _parent_0 = McpServer
-  local _base_0 = { }
+  local _base_0 = {
+    get_app = function(self)
+      if self.app then
+        return self.app
+      end
+      local config = require("lapis.config").get()
+      local app_module = config and config.app_module or "app"
+      local app
+      ok, app = pcall(require, app_module)
+      if ok then
+        self.app = app
+        return self.app
+      end
+    end
+  }
   _base_0.__index = _base_0
   setmetatable(_base_0, _parent_0.__base)
   _class_0 = setmetatable({
@@ -15,7 +29,6 @@ do
         options = { }
       end
       self.app = options.app
-      self.config = options.config
       return _class_0.__parent.__init(self, options)
     end,
     __base = _base_0,
@@ -55,9 +68,11 @@ do
       title = "List Routes"
     }
   }, function(self, params)
-    local routes = { }
-    assert(self.app, "Missing app class")
-    local router = self.app().router
+    local app = self:get_app()
+    if not (app) then
+      return nil, "Could not load Lapis application (set config.app_module or pass app= when constructing the server)"
+    end
+    local router = app().router
     router:build()
     local tuples
     do
@@ -130,9 +145,7 @@ do
         title = "Get Model Schema"
       }
     }, function(self, params)
-      if not (self.config) then
-        return nil, "schema tool requires Lapis project config (none was provided when starting the server)"
-      end
+      local config = require("lapis.config").get()
       local autoload
       autoload = require("lapis.util").autoload
       local loader = autoload("models")
@@ -151,7 +164,7 @@ do
             break
           end
           local schema_lines
-          ok, schema_lines = pcall(pg_schema.extract_schema_sql, self.config, model)
+          ok, schema_lines = pcall(pg_schema.extract_schema_sql, config, model)
           if not (ok) then
             results[model_name] = {
               error = tostring(schema_lines)

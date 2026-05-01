@@ -8,8 +8,21 @@ class LapisMcpServer extends McpServer
 
   new: (options={}) =>
     @app = options.app
-    @config = options.config
     super options
+
+  -- Resolve the Lapis App class for the current project. Returns the value
+  -- passed to the constructor when present, otherwise tries to require the
+  -- module named by config.app_module (default "app").
+  get_app: =>
+    return @app if @app
+
+    config = require("lapis.config").get!
+    app_module = config and config.app_module or "app"
+
+    ok, app = pcall require, app_module
+    if ok
+      @app = app
+      @app
 
   -- Register the built-in Lapis tools
   @add_tool {
@@ -24,9 +37,10 @@ class LapisMcpServer extends McpServer
       title: "List Routes"
     }
   }, (params) =>
-    routes = {}
-    assert @app, "Missing app class"
-    router = @.app!.router
+    app = @get_app!
+    return nil, "Could not load Lapis application (set config.app_module or pass app= when constructing the server)" unless app
+
+    router = app!.router
     router\build!
 
     tuples = [{k,v} for k,v in pairs router.named_routes]
@@ -86,7 +100,7 @@ class LapisMcpServer extends McpServer
         title: "Get Model Schema"
       }
     }, (params) =>
-      return nil, "schema tool requires Lapis project config (none was provided when starting the server)" unless @config
+      config = require("lapis.config").get!
 
       import autoload from require "lapis.util"
       loader = autoload "models"
@@ -98,7 +112,7 @@ class LapisMcpServer extends McpServer
           results[model_name] = { error: "Model not found: #{model_name}" }
           continue
 
-        ok, schema_lines = pcall pg_schema.extract_schema_sql, @config, model
+        ok, schema_lines = pcall pg_schema.extract_schema_sql, config, model
         unless ok
           results[model_name] = { error: tostring schema_lines }
           continue
