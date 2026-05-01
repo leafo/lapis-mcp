@@ -5,10 +5,7 @@ do
 end
 local find_lapis_application
 find_lapis_application = function(config)
-  local app_module = "app"
-  if config and config.app_module then
-    app_module = config.app_module
-  end
+  local app_module = config and config.app_module or "app"
   local ok, app = pcall(require, app_module)
   if ok then
     return app
@@ -18,24 +15,28 @@ find_lapis_application = function(config)
   if ok then
     return lapis.Application()
   end
-  return error("Could not find a Lapis application")
+  return nil
 end
 return {
   argparser = function()
     return build_parser({
       name = "lapis mcp",
-      description = "Run an MCP server over stdin/out that can communicate with details of Lapis app",
+      description = "Run a Lua/MoonScript MCP server over stdin/stdout, with the current Lapis application injected as `app`",
       setup_parser = function(parser)
-        return parser:argument("server_module", "Name of the MCP server module to load", "lapis.mcp.lapis_server")
+        return parser:argument("server_module", "Name of the MCP server module to load (e.g. lapis.mcp.lapis_server)")
       end
     })
   end,
   function(self, args, lapis_args)
-    local config = self:get_config(lapis_args.environment)
+    local ok, config = pcall(self.get_config, self, lapis_args.environment)
+    if not (ok) then
+      config = nil
+    end
     local ServerClass = require(args.server_module)
     local server = ServerClass({
       debug = args.debug,
-      app = find_lapis_application(config)
+      app = find_lapis_application(config),
+      config = config
     })
     return run_parsed_args(server, args)
   end

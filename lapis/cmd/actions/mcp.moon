@@ -1,41 +1,40 @@
 import build_parser, run_parsed_args from require "lapis.mcp.cli"
 
--- Helper functions outside the class
+-- Best-effort lookup of the current Lapis application. Returns nil if the
+-- project doesn't expose one — custom MCP servers may not need an app at all.
 find_lapis_application = (config) ->
-  -- Try to load the main application module
-  app_module = "app"
-  if config and config.app_module
-    app_module = config.app_module
+  app_module = config and config.app_module or "app"
 
-  ok, app = pcall(require, app_module)
-  if ok
-    return app
+  ok, app = pcall require, app_module
+  return app if ok
 
-  -- Fall back to loading a default Lapis application
-  ok, lapis = pcall(require, "lapis")
-  if ok
-    return lapis.Application()
+  ok, lapis = pcall require, "lapis"
+  return lapis.Application! if ok
 
-  error("Could not find a Lapis application")
+  nil
 
--- Command-line interface for the MCP server
+-- Command-line interface for running an MCP server in the context of a Lapis
+-- project. The chosen server module is loaded, instantiated with the project's
+-- application (when one is available) and started over stdio.
 {
   argparser: ->
     build_parser {
       name: "lapis mcp"
-      description: "Run an MCP server over stdin/out that can communicate with details of Lapis app"
+      description: "Run a Lua/MoonScript MCP server over stdin/stdout, with the current Lapis application injected as `app`"
       setup_parser: (parser) ->
-        parser\argument "server_module", "Name of the MCP server module to load", "lapis.mcp.lapis_server"
+        parser\argument "server_module", "Name of the MCP server module to load (e.g. lapis.mcp.lapis_server)"
     }
 
   (args, lapis_args) =>
-    config = @get_config lapis_args.environment
+    ok, config = pcall @get_config, @, lapis_args.environment
+    config = nil unless ok
 
     ServerClass = require args.server_module
 
     server = ServerClass {
       debug: args.debug
-      app: find_lapis_application(config)
+      app: find_lapis_application config
+      config: config
     }
 
     run_parsed_args server, args
