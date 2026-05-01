@@ -16,6 +16,31 @@ build_base_url = (req) ->
   host = req.headers["x-forwarded-host"] or req.headers["host"] or "localhost"
   "#{scheme}://#{host}"
 
+-- Path component of the protected resource (e.g. "/mcp" or ""). When
+-- oauth.resource is an absolute URL we parse the path out of it; otherwise
+-- we use the mount path the MCP handler is registered at.
+resource_path = (oauth, mount_path) ->
+  if oauth.resource
+    p = oauth.resource\match "^[^:]+://[^/]*(/.*)$"
+    return "" unless p
+    return "" if p == "/"
+    return p
+  return "" unless mount_path
+  return "" if mount_path == "" or mount_path == "/"
+  mount_path
+
+-- Full URL identifying the protected resource (used in metadata body).
+resource_url = (req, oauth, mount_path) ->
+  return oauth.resource if oauth.resource
+  build_base_url(req) .. resource_path(oauth, mount_path)
+
+-- Where the protected-resource metadata lives, per RFC 9728 §3. For a
+-- resource at "/mcp" the metadata URL is "/.well-known/oauth-protected-resource/mcp".
+protected_resource_metadata_url = (req, oauth, mount_path) ->
+  base = build_base_url req
+  path = resource_path oauth, mount_path
+  "#{base}/.well-known/oauth-protected-resource#{path}"
+
 base64url_no_pad = (s) ->
   encoded = ngx.encode_base64 s
   (encoded\gsub("+", "-")\gsub("/", "_")\gsub("=", ""))
@@ -40,13 +65,12 @@ verify_bearer_token = (oauth, header) ->
   expected = oauth.access_token or oauth.client_secret
   token == expected
 
-protected_resource_handler = (oauth) ->
+protected_resource_handler = (oauth, mount_path) ->
   =>
-    base = oauth.resource or build_base_url @req
     issuer = oauth.issuer or build_base_url @req
     {
       json: {
-        resource: base
+        resource: resource_url @req, oauth, mount_path
         authorization_servers: setmetatable {issuer}, json.array_mt
         bearer_methods_supported: setmetatable {"header"}, json.array_mt
       }
@@ -147,6 +171,9 @@ token_handler = (oauth) ->
     }
 
   respond_to {
+    on_invalid_method: =>
+      status: 405, layout: false, headers: cors_headers
+
     OPTIONS: =>
       status: 204, layout: false, headers: cors_headers
 
@@ -190,11 +217,19 @@ token_handler = (oauth) ->
           error_response 400, "unsupported_grant_type"
   }
 
-register_routes = (app, oauth) ->
+register_routes = (app, oauth, mount_path) ->
   assert oauth.client_id, "oauth.client_id is required"
   assert oauth.client_secret, "oauth.client_secret is required"
 
-  app\match "/.well-known/oauth-protected-resource", protected_resource_handler oauth
+  handler = protected_resource_handler oauth, mount_path
+  app\match "/.well-known/oauth-protected-resource", handler
+
+  -- RFC 9728 §3: when the resource has a non-empty path, clients probe
+  -- "/.well-known/oauth-protected-resource{path}" instead of the root form.
+  rpath = resource_path oauth, mount_path
+  if rpath != ""
+    app\match "/.well-known/oauth-protected-resource#{rpath}", handler
+
   app\match "/.well-known/oauth-authorization-server", authorization_server_handler oauth
   app\match "/oauth/authorize", authorize_handler oauth
   app\match "/oauth/token", token_handler oauth
@@ -204,6 +239,9 @@ register_routes = (app, oauth) ->
   :verify_bearer_token
   :verify_pkce
   :build_base_url
+  :resource_path
+  :resource_url
+  :protected_resource_metadata_url
   :protected_resource_handler
   :authorization_server_handler
   :authorize_handler

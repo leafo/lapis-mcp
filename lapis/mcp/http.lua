@@ -85,6 +85,7 @@ mcp_handler = function(ServerClass, opts)
     opts = { }
   end
   local oauth = opts.oauth
+  local mount_path = opts.path or "/"
   return respond_to({
     before = function(self)
       local origin = self.req.headers["origin"]
@@ -106,8 +107,7 @@ mcp_handler = function(ServerClass, opts)
       end
       if oauth and self.req.cmd_mth ~= "OPTIONS" then
         if not (oauth_shim.verify_bearer_token(oauth, self.req.headers["authorization"])) then
-          local base = oauth.resource or oauth_shim.build_base_url(self.req)
-          local metadata_url = tostring(base) .. "/.well-known/oauth-protected-resource"
+          local metadata_url = oauth_shim.protected_resource_metadata_url(self.req, oauth, mount_path)
           self:write({
             json = {
               error = "unauthorized"
@@ -249,10 +249,11 @@ serve = function(server_module, opts)
   end
   local lapis = require("lapis")
   local app = lapis.Application()
+  local mount_path = opts.path or "/"
   if opts.oauth then
-    oauth_shim.register_routes(app, opts.oauth)
+    oauth_shim.register_routes(app, opts.oauth, mount_path)
   end
-  app:match(opts.path or "/", mcp_handler(ServerClass, opts))
+  app:match(mount_path, mcp_handler(ServerClass, opts))
   return lapis.serve(app)
 end
 return {

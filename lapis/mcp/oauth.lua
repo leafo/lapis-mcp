@@ -14,6 +14,39 @@ build_base_url = function(req)
   local host = req.headers["x-forwarded-host"] or req.headers["host"] or "localhost"
   return tostring(scheme) .. "://" .. tostring(host)
 end
+local resource_path
+resource_path = function(oauth, mount_path)
+  if oauth.resource then
+    local p = oauth.resource:match("^[^:]+://[^/]*(/.*)$")
+    if not (p) then
+      return ""
+    end
+    if p == "/" then
+      return ""
+    end
+    return p
+  end
+  if not (mount_path) then
+    return ""
+  end
+  if mount_path == "" or mount_path == "/" then
+    return ""
+  end
+  return mount_path
+end
+local resource_url
+resource_url = function(req, oauth, mount_path)
+  if oauth.resource then
+    return oauth.resource
+  end
+  return build_base_url(req) .. resource_path(oauth, mount_path)
+end
+local protected_resource_metadata_url
+protected_resource_metadata_url = function(req, oauth, mount_path)
+  local base = build_base_url(req)
+  local path = resource_path(oauth, mount_path)
+  return tostring(base) .. "/.well-known/oauth-protected-resource" .. tostring(path)
+end
 local base64url_no_pad
 base64url_no_pad = function(s)
   local encoded = ngx.encode_base64(s)
@@ -52,13 +85,12 @@ verify_bearer_token = function(oauth, header)
   return token == expected
 end
 local protected_resource_handler
-protected_resource_handler = function(oauth)
+protected_resource_handler = function(oauth, mount_path)
   return function(self)
-    local base = oauth.resource or build_base_url(self.req)
     local issuer = oauth.issuer or build_base_url(self.req)
     return {
       json = {
-        resource = base,
+        resource = resource_url(self.req, oauth, mount_path),
         authorization_servers = setmetatable({
           issuer
         }, json.array_mt),
@@ -212,6 +244,13 @@ token_handler = function(oauth)
     }
   end
   return respond_to({
+    on_invalid_method = function(self)
+      return {
+        status = 405,
+        layout = false,
+        headers = cors_headers
+      }
+    end,
     OPTIONS = function(self)
       return {
         status = 204,
@@ -272,10 +311,15 @@ token_handler = function(oauth)
   })
 end
 local register_routes
-register_routes = function(app, oauth)
+register_routes = function(app, oauth, mount_path)
   assert(oauth.client_id, "oauth.client_id is required")
   assert(oauth.client_secret, "oauth.client_secret is required")
-  app:match("/.well-known/oauth-protected-resource", protected_resource_handler(oauth))
+  local handler = protected_resource_handler(oauth, mount_path)
+  app:match("/.well-known/oauth-protected-resource", handler)
+  local rpath = resource_path(oauth, mount_path)
+  if rpath ~= "" then
+    app:match("/.well-known/oauth-protected-resource" .. tostring(rpath), handler)
+  end
   app:match("/.well-known/oauth-authorization-server", authorization_server_handler(oauth))
   app:match("/oauth/authorize", authorize_handler(oauth))
   return app:match("/oauth/token", token_handler(oauth))
@@ -285,6 +329,9 @@ return {
   verify_bearer_token = verify_bearer_token,
   verify_pkce = verify_pkce,
   build_base_url = build_base_url,
+  resource_path = resource_path,
+  resource_url = resource_url,
+  protected_resource_metadata_url = protected_resource_metadata_url,
   protected_resource_handler = protected_resource_handler,
   authorization_server_handler = authorization_server_handler,
   authorize_handler = authorize_handler,

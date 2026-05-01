@@ -45,6 +45,7 @@ merge_headers = (base, extra) ->
 
 mcp_handler = (ServerClass, opts={}) ->
   oauth = opts.oauth
+  mount_path = opts.path or "/"
 
   respond_to {
     before: =>
@@ -64,8 +65,7 @@ mcp_handler = (ServerClass, opts={}) ->
 
       if oauth and @req.cmd_mth != "OPTIONS"
         unless oauth_shim.verify_bearer_token oauth, @req.headers["authorization"]
-          base = oauth.resource or oauth_shim.build_base_url @req
-          metadata_url = "#{base}/.well-known/oauth-protected-resource"
+          metadata_url = oauth_shim.protected_resource_metadata_url @req, oauth, mount_path
           @write {
             json: {error: "unauthorized"}
             status: 401
@@ -173,10 +173,12 @@ serve = (server_module, opts={}) ->
 
   app = lapis.Application!
 
-  if opts.oauth
-    oauth_shim.register_routes app, opts.oauth
+  mount_path = opts.path or "/"
 
-  app\match opts.path or "/", mcp_handler ServerClass, opts
+  if opts.oauth
+    oauth_shim.register_routes app, opts.oauth, mount_path
+
+  app\match mount_path, mcp_handler ServerClass, opts
   lapis.serve app
 
 {:mcp_handler, :HttpNoopTransport, :serve}
