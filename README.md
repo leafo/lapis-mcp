@@ -1,8 +1,11 @@
 # Lapis MCP
 
-A libray for developing MCP servers or definining LLM tool calls in
-Lua/MoonScript. Also contains a default MCP server for communicating with Lapis
-web applications.
+A library for building Model Context Protocol (MCP) servers and defining LLM
+tool calls in Lua/MoonScript. Provides a base class for authoring servers,
+adapters that expose those servers' tools to OpenAI/Anthropic/Gemini APIs,
+stdio and HTTP transports, an OAuth shim for protected endpoints, and a `lapis`
+subcommand for running a server inside a Lapis project. A small bundled server
+for introspecting Lapis applications is included as a starting point.
 
 ## Installation
 
@@ -10,33 +13,10 @@ web applications.
 luarocks install lapis-mcp
 ```
 
-## Lapis MCP Usage
-
-This library provides a `lapis` subcommand, `mcp`, which can be used to start
-an MCP server tied to the Lapis application in the current directory.
-
-```
-lapis mcp
-```
-
-### Available Tools
-
-- **list_routes** - Lists all named routes in the Lapis application
-- **list_models** - Lists all database models defined in the application (classes that represent database tables)
-- **schema** - Shows the SQL schema for a specific database model (requires model_name parameter)
-
-The server automatically discovers routes from your application's router and models from the `models/` directory.
-
 ## Creating Your Own MCP Server
 
-This project provides a reusable `McpServer` base class that you can extend to create your own MCP servers. Here's how to implement your own:
-
-### Key Features
-
-- **Inheritance-based tool registration** - Tools are inherited from parent classes, with the ability for subclasses to override tools by name
-- **Error handling** - Both exceptions and explicit error returns are handled
-- **Debug logging** - Optional debug output with colored console logging
-- **MCP protocol compliance** - Follows the MCP 2025-06-18 specification
+This project provides a reusable `McpServer` base class that you can extend to
+create your own MCP servers. Here's how to implement your own:
 
 ### Full Example: File System MCP Server
 
@@ -561,7 +541,8 @@ server\run_stdio()
 
 #### CLI Execution
 
-The `run_cli` class method that exposes the server of stdio transport with argument based configuration.
+The `run_cli` class method that exposes the server of stdio transport with
+argument based configuration via `argparse`.
 
 ##### Lua
 
@@ -758,13 +739,14 @@ move the location (`location /mcp { ... }`) or pass `{path = "/mcp"}` to
 To make a remote MCP server compatible with Claude.ai's custom connectors (or
 any client that expects OAuth-protected MCP endpoints), `serve` can install a
 minimal OAuth shim that gates access behind a static service token. There is
-no real login flow — the shim just satisfies the OAuth protocol surface so the
+no real login flow. The shim just satisfies the OAuth protocol surface so the
 client can complete an authorization round-trip and obtain a bearer token.
 
 When `opts.oauth` is set, `serve` registers these routes alongside the MCP
 endpoint:
 
 - `GET /.well-known/oauth-protected-resource` (RFC 9728)
+- `GET /.well-known/oauth-protected-resource{mount_path}` — also registered when the MCP endpoint is mounted at a non-root path (per RFC 9728 §3, clients probe the path-suffixed form)
 - `GET /.well-known/oauth-authorization-server` (RFC 8414)
 - `GET /oauth/authorize`
 - `POST /oauth/token`
@@ -774,9 +756,11 @@ a `WWW-Authenticate` header pointing at the resource metadata when missing or
 invalid. Clients discover the authorization server, run the
 `authorization_code` flow with PKCE (auto-approved with no UI), and exchange
 the resulting code for an access token at `/oauth/token`. The
-`client_credentials` grant is also supported. Auth codes are stateless
-HMAC-signed payloads using `client_secret`, so no storage is required between
-the `/authorize` and `/token` requests.
+`client_credentials` grant is also supported. The token endpoint accepts
+client credentials either as POST body parameters (`client_secret_post`) or as
+an `Authorization: Basic` header (`client_secret_basic`). Auth codes are
+stateless HMAC-signed payloads using `client_secret`, so no storage is
+required between the `/authorize` and `/token` requests.
 
 ```nginx
 location / {
@@ -807,7 +791,7 @@ configured `access_token` to Claude, which sends it back as
 - `access_token` (optional) — the bearer token returned to the client and accepted on the MCP endpoint. Defaults to `client_secret`.
 - `access_token_ttl` (optional) — `expires_in` returned at the token endpoint. Defaults to `3600`.
 - `issuer` (optional) — issuer URL exposed in the metadata documents. Derived from the request `Host` (and `X-Forwarded-Proto`/`X-Forwarded-Host`) when omitted.
-- `resource` (optional) — resource URL exposed in the protected-resource metadata. Defaults to the issuer.
+- `resource` (optional) — resource URL exposed in the protected-resource metadata. Defaults to the request's base URL joined with the MCP mount path (e.g. `https://host/mcp` when mounted at `/mcp`); coincides with the issuer only when the MCP endpoint is mounted at the root.
 
 Because this is a service-token shim and not real user authentication, anyone
 with the configured `client_secret` (or `access_token`) can call the MCP
@@ -815,6 +799,47 @@ server. Always serve over HTTPS, treat the secret like an API key, and rotate
 by updating the `oauth` table and restarting. If you need real user identity
 or per-user scopes, delegate to a proper authorization server instead of using
 this shim.
+
+## The `lapis mcp` Subcommand
+
+Installing this library adds a `mcp` subcommand to the `lapis` CLI. It loads an
+MCP server module by name and runs it over stdin/stdout, a convenience for
+projects that already use the `lapis` CLI, so you don't need to write a
+separate launcher script.
+
+```bash
+lapis mcp <module>
+```
+
+The `<module>` argument is required and is the Lua/MoonScript module name of
+any class that returns an `McpServer` subclass. For example, to start a
+server you wrote yourself:
+
+```bash
+lapis mcp my.project.mcp_server
+```
+
+The shared CLI flags described in [Running Your Server](#running-your-server)
+(`--debug`, `--tool`, `--dump-tools`, `--send-message`, `--tag`, etc.) all
+work the same here — internally `lapis mcp` dispatches through the same
+argparse-driven runner that `McpServer:run_cli` uses for standalone scripts.
+
+## Bundled Lapis MCP Server
+
+`lapis.mcp.lapis_server` is a small read-only `McpServer` subclass that ships
+with the library and provides a handful of tools for introspecting the
+current Lapis application. Run it through the `lapis mcp` subcommand:
+
+```bash
+lapis mcp lapis.mcp.lapis_server
+```
+
+It resolves the project's Lapis application on demand (via
+`config.app_module`, falling back to `app`) and exposes:
+
+- **list_routes** — lists all named routes in the application's router
+- **list_models** — lists database model files found under `models/`
+- **schema** *(optional, only registered when [`lapis-annotate`](https://github.com/leafo/lapis-annotate) is installed)* — given a list of model class names, dumps each model's PostgreSQL schema (CREATE TABLE plus indexes/constraints) by shelling out to `pg_dump` with the project's `config.postgres` credentials.
 
 ## License
 
