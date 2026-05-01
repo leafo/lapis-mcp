@@ -2542,6 +2542,9 @@ describe "LapisMcpServer", ->
 
     assert.is_not_nil tools.list_routes
     assert.is_not_nil tools.list_models
+    assert.is_not_nil tools.simulate
+    assert.is_not_nil tools.list_cookies
+    assert.is_not_nil tools.clear_cookies
     assert.is_not_nil tools.schema
 
     -- Check list_routes tool structure
@@ -2596,3 +2599,159 @@ describe "LapisMcpServer", ->
       assert.is_table routes[1][2]
       assert.equal "/", routes[1][2][1]
       assert.equal "GET", routes[1][2][2]
+
+  describe "simulate tool", ->
+    lapis = require "lapis"
+
+    local app_cls, server
+
+    before_each ->
+      class TestApp extends lapis.Application
+        layout: false
+        "/hello": => "hello world"
+        "/echo-header": => "ua=#{@req.headers["user-agent"] or ""}"
+        "/boom": => { status: 500, "kaboom" }
+        "/login": =>
+          @cookies.session = "abc123"
+          "logged in"
+        "/whoami": => "session=#{@cookies.session or "anonymous"}"
+        "/logout": =>
+          @cookies.session = ""
+          "logged out"
+
+      app_cls = TestApp
+      server = LapisMcpServer { app: app_cls }
+      server\skip_initialize!
+
+    it "issues a GET request and returns status, headers, and body", ->
+      response = server\handle_tools_call {
+        jsonrpc: "2.0"
+        id: 5
+        method: "tools/call"
+        params: {
+          name: "simulate"
+          arguments: { path: "/hello" }
+        }
+      }
+
+      assert.is_false response.result.isError
+      result = json.decode response.result.content[1].text
+      assert.equal 200, result.status
+      assert.equal "hello world", result.body
+      assert.is_table result.headers
+
+    it "passes custom headers through to the app", ->
+      response = server\handle_tools_call {
+        jsonrpc: "2.0"
+        id: 6
+        method: "tools/call"
+        params: {
+          name: "simulate"
+          arguments: {
+            path: "/echo-header"
+            headers: { "User-Agent": "mcp-test" }
+          }
+        }
+      }
+
+      assert.is_false response.result.isError
+      result = json.decode response.result.content[1].text
+      assert.equal 200, result.status
+      assert.equal "ua=mcp-test", result.body
+
+    it "returns non-2xx status codes from the app", ->
+      response = server\handle_tools_call {
+        jsonrpc: "2.0"
+        id: 7
+        method: "tools/call"
+        params: {
+          name: "simulate"
+          arguments: { path: "/boom" }
+        }
+      }
+
+      assert.is_false response.result.isError
+      result = json.decode response.result.content[1].text
+      assert.equal 500, result.status
+
+  describe "cookie jar", ->
+    lapis = require "lapis"
+
+    local server
+
+    call_simulate = (path) ->
+      server\handle_tools_call {
+        jsonrpc: "2.0"
+        id: math.random 1, 1000000
+        method: "tools/call"
+        params: {
+          name: "simulate"
+          arguments: { :path }
+        }
+      }
+
+    before_each ->
+      class TestApp extends lapis.Application
+        layout: false
+        "/login": =>
+          @cookies.session = "abc123"
+          "logged in"
+        "/whoami": => "session=#{@cookies.session or "anonymous"}"
+        "/logout": =>
+          @cookies.session = ""
+          "logged out"
+
+      server = LapisMcpServer { app: TestApp }
+      server\skip_initialize!
+
+    it "absorbs Set-Cookie headers and replays them on subsequent requests", ->
+      call_simulate "/login"
+      assert.equal "abc123", server.cookie_jar.session
+
+      response = call_simulate "/whoami"
+      result = json.decode response.result.content[1].text
+      assert.equal "session=abc123", result.body
+
+    it "removes cookies cleared by the app (empty value)", ->
+      call_simulate "/login"
+      call_simulate "/logout"
+      assert.is_nil server.cookie_jar.session
+
+    it "list_cookies returns the current jar as sorted [name, value] pairs", ->
+      call_simulate "/login"
+
+      response = server\handle_tools_call {
+        jsonrpc: "2.0"
+        id: 100
+        method: "tools/call"
+        params: { name: "list_cookies", arguments: {} }
+      }
+
+      assert.is_false response.result.isError
+      cookies = json.decode response.result.content[1].text
+      assert.is_table cookies
+
+      found = false
+      for pair in *cookies
+        if pair[1] == "session" and pair[2] == "abc123"
+          found = true
+          break
+      assert.is_true found
+
+    it "clear_cookies empties the jar", ->
+      call_simulate "/login"
+      assert.equal "abc123", server.cookie_jar.session
+
+      response = server\handle_tools_call {
+        jsonrpc: "2.0"
+        id: 101
+        method: "tools/call"
+        params: { name: "clear_cookies", arguments: {} }
+      }
+
+      assert.is_false response.result.isError
+      assert.is_nil server.cookie_jar.session
+
+      whoami = call_simulate "/whoami"
+      result = json.decode whoami.result.content[1].text
+      assert.equal "session=anonymous", result.body

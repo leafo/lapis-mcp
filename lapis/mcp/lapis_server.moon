@@ -8,7 +8,27 @@ class LapisMcpServer extends McpServer
 
   new: (options={}) =>
     @app = options.app
+    @cookie_jar = {}
     super options
+
+  -- Merge Set-Cookie headers from a response into the cookie jar. Defers to
+  -- lapis.spec.request.extract_cookies so values are URL-decoded the same way
+  -- the framework decodes them on a real request — otherwise jar values would
+  -- be re-escaped on the next simulate call (double-encoding) and break any
+  -- check (e.g. CSRF) that compares the cookie value byte-for-byte.
+  -- Empty values clear the cookie (typical logout flow).
+  absorb_cookies: (response_headers) =>
+    return unless response_headers
+
+    import extract_cookies from require "lapis.spec.request"
+    parsed = extract_cookies response_headers
+    return unless parsed
+
+    for name, val in pairs parsed
+      if val == nil or val == ""
+        @cookie_jar[name] = nil
+      else
+        @cookie_jar[name] = val
 
   -- Resolve the Lapis App class for the current project. Returns the value
   -- passed to the constructor when present, otherwise tries to require the
@@ -77,6 +97,99 @@ class LapisMcpServer extends McpServer
         }
 
     models
+
+  @add_tool {
+    name: "simulate"
+    description: "Simulate an HTTP request against the Lapis application without starting a server. Returns the response status, headers, and body."
+    inputSchema: {
+      type: "object"
+      properties: {
+        path: {
+          type: "string"
+          description: "Request path, may include query string (e.g. /users?id=1)"
+        }
+        method: {
+          type: "string"
+          enum: {"GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "PATCH"}
+          description: "HTTP method (defaults to GET)"
+        }
+        body: {
+          type: "string"
+          description: "Raw request body"
+        }
+        headers: {
+          type: "object"
+          additionalProperties: { type: "string" }
+          description: "Request headers as a name->value map"
+        }
+        host: {
+          type: "string"
+          description: "Override Host header (default localhost)"
+        }
+        scheme: {
+          type: "string"
+          enum: {"http", "https"}
+          description: "Request scheme (default http)"
+        }
+      }
+      required: {"path"}
+    }
+    annotations: {
+      title: "Simulate Request"
+    }
+  }, (params) =>
+    app = @get_app!
+    return nil, "Could not load Lapis application (set config.app_module or pass app= when constructing the server)" unless app
+
+    import simulate_request from require "lapis.spec.request"
+
+    opts = {
+      method: params.method
+      body: params.body
+      headers: params.headers
+      host: params.host
+      scheme: params.scheme
+      cookies: next(@cookie_jar) and @cookie_jar or nil
+      allow_error: true
+    }
+
+    ok, status, body, headers = pcall simulate_request, app, params.path, opts
+    return nil, "simulate_request failed: #{status}" unless ok
+
+    @absorb_cookies headers
+
+    { :status, :headers, :body }
+
+  @add_tool {
+    name: "list_cookies"
+    description: "Returns the current contents of the cookie jar as an array of [name, value] pairs. The jar is populated automatically from Set-Cookie response headers on each `simulate` call and replayed on subsequent requests."
+    inputSchema: {
+      type: "object"
+      properties: {}
+      required: setmetatable {}, json.array_mt
+    }
+    annotations: {
+      title: "List Cookies"
+    }
+  }, (params) =>
+    tuples = [{k, v} for k, v in pairs @cookie_jar]
+    table.sort tuples, (a, b) -> a[1] < b[1]
+    tuples
+
+  @add_tool {
+    name: "clear_cookies"
+    description: "Empties the cookie jar. Subsequent `simulate` calls start with no cookies until the app sets new ones."
+    inputSchema: {
+      type: "object"
+      properties: {}
+      required: setmetatable {}, json.array_mt
+    }
+    annotations: {
+      title: "Clear Cookies"
+    }
+  }, (params) =>
+    @cookie_jar = {}
+    { cleared: true }
 
   -- The `schema` tool depends on `lapis-annotate`, which is not declared as a
   -- hard dependency. Only register the tool when the module is available.

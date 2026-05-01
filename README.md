@@ -826,8 +826,8 @@ argparse-driven runner that `McpServer:run_cli` uses for standalone scripts.
 
 ## Bundled Lapis MCP Server
 
-`lapis.mcp.lapis_server` is a small read-only `McpServer` subclass that ships
-with the library and provides a handful of tools for introspecting the
+`lapis.mcp.lapis_server` is a small `McpServer` subclass that ships with the
+library and provides a handful of tools for introspecting and exercising the
 current Lapis application. Run it through the `lapis mcp` subcommand:
 
 ```bash
@@ -839,6 +839,9 @@ It resolves the project's Lapis application on demand (via
 
 - **list_routes** — lists all named routes in the application's router
 - **list_models** — lists database model files found under `models/`
+- **simulate** — issues a fake HTTP request through the loaded app (via `lapis.spec.request.simulate_request`) and returns the response status, headers, and body. Accepts `path` (required), `method`, `body`, `headers`, `host`, and `scheme`. Cookies set by the app via `Set-Cookie` are automatically captured into a per-session jar and replayed on subsequent calls, so an agent can log in and then make authenticated requests as the same user.
+- **list_cookies** — returns the current contents of the cookie jar as a sorted array of `[name, value]` pairs.
+- **clear_cookies** — empties the cookie jar.
 - **schema** *(optional, only registered when [`lapis-annotate`](https://github.com/leafo/lapis-annotate) is installed)* — given a list of model class names, dumps each model's PostgreSQL schema (CREATE TABLE plus indexes/constraints) by shelling out to `pg_dump` with the project's `config.postgres` credentials.
 
 ## License
