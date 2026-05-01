@@ -8,6 +8,7 @@ class LapisMcpServer extends McpServer
 
   new: (options={}) =>
     @app = options.app
+    @config = options.config
     super options
 
   -- Register the built-in Lapis tools
@@ -63,28 +64,45 @@ class LapisMcpServer extends McpServer
 
     models
 
-  @add_tool {
-    name: "schema"
-    description: "Shows the SQl schema for a specific database model"
-    inputSchema: {
-      type: "object"
-      properties: {
-        model_name: {
-          type: "string"
-          description: "Name of the model to inspect"
+  -- The `schema` tool depends on `lapis-annotate`, which is not declared as a
+  -- hard dependency. Only register the tool when the module is available.
+  ok, pg_schema = pcall require, "lapis.annotate.pg_schema"
+  if ok
+    @add_tool {
+      name: "schema"
+      description: "Returns the SQL schema (CREATE TABLE, indexes, constraints) for one or more database models, dumped live from the project's PostgreSQL database via pg_dump."
+      inputSchema: {
+        type: "object"
+        properties: {
+          models: {
+            type: "array"
+            items: { type: "string" }
+            description: "Model class names to dump (e.g. [\"Users\", \"Posts\"])"
+          }
         }
+        required: {"models"}
       }
-      required: {"model_name"}
-    }
-    annotations: {
-      title: "Get Model Schema"
-    }
-  }, (params) =>
-    model_name = params.model_name
+      annotations: {
+        title: "Get Model Schema"
+      }
+    }, (params) =>
+      return nil, "schema tool requires Lapis project config (none was provided when starting the server)" unless @config
 
-    ok, db = pcall(require, "models")
-    if not ok or type(db) != "table" or not db[model_name]
-      return nil, "Model not found: #{model_name}"
+      import autoload from require "lapis.util"
+      loader = autoload "models"
 
-    model = db[model_name]
-    error "not implemented yet"
+      results = {}
+      for model_name in *params.models
+        model = loader[model_name]
+        unless model
+          results[model_name] = { error: "Model not found: #{model_name}" }
+          continue
+
+        ok, schema_lines = pcall pg_schema.extract_schema_sql, @config, model
+        unless ok
+          results[model_name] = { error: tostring schema_lines }
+          continue
+
+        results[model_name] = { schema: table.concat schema_lines, "\n" }
+
+      results

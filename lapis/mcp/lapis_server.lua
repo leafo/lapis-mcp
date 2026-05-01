@@ -4,6 +4,7 @@ McpServer = require("lapis.mcp.server").McpServer
 local LapisMcpServer
 do
   local _class_0
+  local ok, pg_schema
   local _parent_0 = McpServer
   local _base_0 = { }
   _base_0.__index = _base_0
@@ -14,6 +15,7 @@ do
         options = { }
       end
       self.app = options.app
+      self.config = options.config
       return _class_0.__parent.__init(self, options)
     end,
     __base = _base_0,
@@ -104,33 +106,71 @@ do
     end
     return models
   end)
-  self:add_tool({
-    name = "schema",
-    description = "Shows the SQl schema for a specific database model",
-    inputSchema = {
-      type = "object",
-      properties = {
-        model_name = {
-          type = "string",
-          description = "Name of the model to inspect"
+  ok, pg_schema = pcall(require, "lapis.annotate.pg_schema")
+  if ok then
+    self:add_tool({
+      name = "schema",
+      description = "Returns the SQL schema (CREATE TABLE, indexes, constraints) for one or more database models, dumped live from the project's PostgreSQL database via pg_dump.",
+      inputSchema = {
+        type = "object",
+        properties = {
+          models = {
+            type = "array",
+            items = {
+              type = "string"
+            },
+            description = "Model class names to dump (e.g. [\"Users\", \"Posts\"])"
+          }
+        },
+        required = {
+          "models"
         }
       },
-      required = {
-        "model_name"
+      annotations = {
+        title = "Get Model Schema"
       }
-    },
-    annotations = {
-      title = "Get Model Schema"
-    }
-  }, function(self, params)
-    local model_name = params.model_name
-    local ok, db = pcall(require, "models")
-    if not ok or type(db) ~= "table" or not db[model_name] then
-      return nil, "Model not found: " .. tostring(model_name)
-    end
-    local model = db[model_name]
-    return error("not implemented yet")
-  end)
+    }, function(self, params)
+      if not (self.config) then
+        return nil, "schema tool requires Lapis project config (none was provided when starting the server)"
+      end
+      local autoload
+      autoload = require("lapis.util").autoload
+      local loader = autoload("models")
+      local results = { }
+      local _list_0 = params.models
+      for _index_0 = 1, #_list_0 do
+        local _continue_0 = false
+        repeat
+          local model_name = _list_0[_index_0]
+          local model = loader[model_name]
+          if not (model) then
+            results[model_name] = {
+              error = "Model not found: " .. tostring(model_name)
+            }
+            _continue_0 = true
+            break
+          end
+          local schema_lines
+          ok, schema_lines = pcall(pg_schema.extract_schema_sql, self.config, model)
+          if not (ok) then
+            results[model_name] = {
+              error = tostring(schema_lines)
+            }
+            _continue_0 = true
+            break
+          end
+          results[model_name] = {
+            schema = table.concat(schema_lines, "\n")
+          }
+          _continue_0 = true
+        until true
+        if not _continue_0 then
+          break
+        end
+      end
+      return results
+    end)
+  end
   if _parent_0.__inherited then
     _parent_0.__inherited(_parent_0, _class_0)
   end
