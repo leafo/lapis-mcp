@@ -1,16 +1,52 @@
 local json = require("cjson.safe")
 local McpServer
 McpServer = require("lapis.mcp.server").McpServer
+local unpack = table.unpack or unpack
+local pack = table.pack or function(...)
+  return {
+    n = select("#", ...),
+    ...
+  }
+end
+local track_package_loaded
+track_package_loaded = function(cb)
+  local before = { }
+  for k in pairs(package.loaded) do
+    before[k] = true
+  end
+  local ok, err = pcall(cb)
+  local added
+  do
+    local _accum_0 = { }
+    local _len_0 = 1
+    for k in pairs(package.loaded) do
+      if not before[k] then
+        _accum_0[_len_0] = k
+        _len_0 = _len_0 + 1
+      end
+    end
+    added = _accum_0
+  end
+  local reset
+  reset = function()
+    for _index_0 = 1, #added do
+      local k = added[_index_0]
+      package.loaded[k] = nil
+    end
+  end
+  if not (ok) then
+    reset()
+    error(err, 2)
+  end
+  return reset
+end
 local LapisMcpServer
 do
   local _class_0
   local ok, pg_schema
   local _parent_0 = McpServer
   local _base_0 = {
-    absorb_cookies = function(self, response_headers)
-      if not (response_headers) then
-        return 
-      end
+    apply_cookies = function(self, response_headers)
       local extract_cookies
       extract_cookies = require("lapis.spec.request").extract_cookies
       local parsed = extract_cookies(response_headers)
@@ -25,18 +61,31 @@ do
         end
       end
     end,
-    get_app = function(self)
-      if self.app then
-        return self.app
+    with_fresh_app = function(self, cb)
+      if self._initial_app then
+        return cb(self._initial_app)
       end
-      local config = require("lapis.config").get()
-      local app_module = config and config.app_module or "app"
-      local app
-      ok, app = pcall(require, app_module)
-      if ok then
-        self.app = app
-        return self.app
+      if self._loaded_reset then
+        self:_loaded_reset()
+        self._loaded_reset = nil
       end
+      local lapis_config = require("lapis.config")
+      lapis_config.reset(true)
+      local app_module = lapis_config.get().app_class or "app"
+      local results, load_err
+      self._loaded_reset = track_package_loaded(function()
+        local app
+        ok, app = pcall(require, app_module)
+        if not (ok) then
+          load_err = "Could not load Lapis application '" .. tostring(app_module) .. "': " .. tostring(app)
+          return 
+        end
+        results = pack(cb(app))
+      end)
+      if load_err then
+        return nil, load_err
+      end
+      return unpack(results, 1, results.n)
     end
   }
   _base_0.__index = _base_0
@@ -46,7 +95,7 @@ do
       if options == nil then
         options = { }
       end
-      self.app = options.app
+      self._initial_app = options.app
       self.cookie_jar = { }
       return _class_0.__parent.__init(self, options)
     end,
@@ -87,29 +136,27 @@ do
       title = "List Routes"
     }
   }, function(self, params)
-    local app = self:get_app()
-    if not (app) then
-      return nil, "Could not load Lapis application (set config.app_module or pass app= when constructing the server)"
-    end
-    local router = app().router
-    router:build()
-    local tuples
-    do
-      local _accum_0 = { }
-      local _len_0 = 1
-      for k, v in pairs(router.named_routes) do
-        _accum_0[_len_0] = {
-          k,
-          v
-        }
-        _len_0 = _len_0 + 1
+    return self:with_fresh_app(function(app)
+      local router = app().router
+      router:build()
+      local tuples
+      do
+        local _accum_0 = { }
+        local _len_0 = 1
+        for k, v in pairs(router.named_routes) do
+          _accum_0[_len_0] = {
+            k,
+            v
+          }
+          _len_0 = _len_0 + 1
+        end
+        tuples = _accum_0
       end
-      tuples = _accum_0
-    end
-    table.sort(tuples, function(a, b)
-      return a[1] < b[1]
+      table.sort(tuples, function(a, b)
+        return a[1] < b[1]
+      end)
+      return tuples
     end)
-    return tuples
   end)
   self:add_tool({
     name = "list_models",
@@ -123,15 +170,9 @@ do
       title = "List Models"
     }
   }, function(self, params)
-    local shell_escape
-    shell_escape = require("lapis.cmd.path").shell_escape
-    local autoload
-    autoload = require("lapis.util").autoload
-    local loader = autoload("models")
     local models = { }
     for file in io.popen("find models/ -type f \\( -name '*.lua' -o -name '*.moon' \\)"):lines() do
       local model_name = file:match("([^/]+)%.%w+$")
-      local model = loader[model_name]
       if model_name and not models[model_name] then
         models[model_name] = {
           name = model_name
@@ -195,32 +236,30 @@ do
       title = "Simulate Request"
     }
   }, function(self, params)
-    local app = self:get_app()
-    if not (app) then
-      return nil, "Could not load Lapis application (set config.app_module or pass app= when constructing the server)"
-    end
-    local simulate_request
-    simulate_request = require("lapis.spec.request").simulate_request
-    local opts = {
-      method = params.method,
-      body = params.body,
-      headers = params.headers,
-      host = params.host,
-      scheme = params.scheme,
-      cookies = next(self.cookie_jar) and self.cookie_jar or nil,
-      allow_error = true
-    }
-    local status, body, headers
-    ok, status, body, headers = pcall(simulate_request, app, params.path, opts)
-    if not (ok) then
-      return nil, "simulate_request failed: " .. tostring(status)
-    end
-    self:absorb_cookies(headers)
-    return {
-      status = status,
-      headers = headers,
-      body = body
-    }
+    return self:with_fresh_app(function(app)
+      local simulate_request
+      simulate_request = require("lapis.spec.request").simulate_request
+      local opts = {
+        method = params.method,
+        body = params.body,
+        headers = params.headers,
+        host = params.host,
+        scheme = params.scheme,
+        cookies = self.cookie_jar,
+        allow_error = true
+      }
+      local status, body, headers
+      ok, status, body, headers = pcall(simulate_request, app, params.path, opts)
+      if not (ok) then
+        return nil, "simulate_request failed: " .. tostring(status)
+      end
+      self:apply_cookies(headers)
+      return {
+        status = status,
+        headers = headers,
+        body = body
+      }
+    end)
   end)
   self:add_tool({
     name = "list_cookies",

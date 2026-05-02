@@ -2755,3 +2755,101 @@ describe "LapisMcpServer", ->
       whoami = call_simulate "/whoami"
       result = json.decode whoami.result.content[1].text
       assert.equal "session=anonymous", result.body
+
+  describe "code reload", ->
+    lapis = require "lapis"
+    lapis_config = require "lapis.config"
+
+    fixture_module = "test.lapis_mcp_reload_fixture"
+    local original_get
+
+    before_each ->
+      -- stub lapis.config.get so with_fresh_app picks up our fixture module
+      -- without needing a real config file on disk; survives lapis_config.reset
+      -- since reset only clears the config_cache/configs tables, not the get fn
+      original_get = lapis_config.get
+      lapis_config.get = -> { app_class: fixture_module }
+
+    after_each ->
+      lapis_config.get = original_get
+      package.preload[fixture_module] = nil
+      package.loaded[fixture_module] = nil
+
+    call_simulate = (server, path) ->
+      server\handle_tools_call {
+        jsonrpc: "2.0"
+        id: math.random 1, 1000000
+        method: "tools/call"
+        params: { name: "simulate", arguments: { :path } }
+      }
+
+    it "re-requires the app module on each call so source edits are picked up", ->
+      load_count = 0
+
+      package.preload[fixture_module] = ->
+        load_count += 1
+        current = load_count
+        class FixtureApp extends lapis.Application
+          layout: false
+          "/version": => "version=#{current}"
+        FixtureApp
+
+      server = LapisMcpServer!
+      server\skip_initialize!
+
+      r1 = call_simulate server, "/version"
+      r2 = call_simulate server, "/version"
+      r3 = call_simulate server, "/version"
+
+      body_1 = json.decode(r1.result.content[1].text).body
+      body_2 = json.decode(r2.result.content[1].text).body
+      body_3 = json.decode(r3.result.content[1].text).body
+
+      assert.equal "version=1", body_1
+      assert.equal "version=2", body_2
+      assert.equal "version=3", body_3
+      assert.equal 3, load_count
+
+    it "preserves the cookie jar across reloads", ->
+      package.preload[fixture_module] = ->
+        class FixtureApp extends lapis.Application
+          layout: false
+          "/login": =>
+            @cookies.session = "xyz"
+            "ok"
+          "/whoami": => "session=#{@cookies.session or "anonymous"}"
+        FixtureApp
+
+      server = LapisMcpServer!
+      server\skip_initialize!
+
+      call_simulate server, "/login"
+      assert.equal "xyz", server.cookie_jar.session
+
+      response = call_simulate server, "/whoami"
+      result = json.decode response.result.content[1].text
+      assert.equal "session=xyz", result.body
+
+    it "skips reload when an explicit app class was provided", ->
+      load_count = 0
+
+      class FixtureApp extends lapis.Application
+        layout: false
+        new: (...) =>
+          load_count += 1
+          super ...
+        "/ping": => "pong"
+
+      server = LapisMcpServer { app: FixtureApp }
+      server\skip_initialize!
+
+      for _ = 1, 3
+        server\handle_tools_call {
+          jsonrpc: "2.0"
+          id: math.random 1, 1000000
+          method: "tools/call"
+          params: { name: "simulate", arguments: { path: "/ping" } }
+        }
+
+      -- explicit-app path should not trigger any reload tracking
+      assert.is_nil server._loaded_reset

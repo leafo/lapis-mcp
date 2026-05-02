@@ -835,7 +835,15 @@ lapis mcp lapis.mcp.lapis_server
 ```
 
 It resolves the project's Lapis application on demand (via
-`config.app_module`, falling back to `app`) and exposes:
+`config.app_class`, falling back to `app`). Because the MCP server is
+long-lived but the application source on disk is expected to change between
+calls, every tool that touches the app (`list_routes`, `simulate`)
+re-`require`s it from scratch — the modules pulled into `package.loaded`
+during a call are tracked and purged before the next call, and
+`lapis.config`'s internal cache is reset, so edits to app, model, view, and
+config files take effect immediately without restarting the server.
+
+It exposes:
 
 - **list_routes** — lists all named routes in the application's router
 - **list_models** — lists database model files found under `models/`
