@@ -68,7 +68,8 @@ class LapisMcpServer extends McpServer
     lapis_config = require "lapis.config"
     lapis_config.reset true
 
-    app_module = lapis_config.get!.app_class or "app"
+    cfg = lapis_config.get!
+    app_module = cfg.default_app_module or cfg.app_class or "app"
 
     -- run the load + callback inside the tracker so anything required
     -- transitively (the app, its models/views, lazy framework deps) is

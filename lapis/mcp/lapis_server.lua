@@ -71,7 +71,8 @@ do
       end
       local lapis_config = require("lapis.config")
       lapis_config.reset(true)
-      local app_module = lapis_config.get().app_class or "app"
+      local cfg = lapis_config.get()
+      local app_module = cfg.default_app_module or cfg.app_class or "app"
       local results, load_err
       self._loaded_reset = track_package_loaded(function()
         local app

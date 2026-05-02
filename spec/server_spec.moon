@@ -2768,7 +2768,7 @@ describe "LapisMcpServer", ->
       -- without needing a real config file on disk; survives lapis_config.reset
       -- since reset only clears the config_cache/configs tables, not the get fn
       original_get = lapis_config.get
-      lapis_config.get = -> { app_class: fixture_module }
+      lapis_config.get = -> { default_app_module: fixture_module }
 
     after_each ->
       lapis_config.get = original_get
