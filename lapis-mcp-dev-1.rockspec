@@ -36,5 +36,6 @@ build = {
     ["lapis.mcp.tool_adapter.gemini"] = "lapis/mcp/tool_adapter/gemini.lua",
     ["lapis.mcp.tool_adapter.openai"] = "lapis/mcp/tool_adapter/openai.lua",
     ["lapis.mcp.uri"] = "lapis/mcp/uri.lua",
+    ["lapis.mcp.version"] = "lapis/mcp/version.lua",
   }
 }
