@@ -9,6 +9,7 @@ add_shared_arguments = function(parser)
     "gemini"
   })
   parser:option("--tool", "Immediately invoke a tool, print output and exit")
+  parser:flag("--list-tools", "List all enabled tool names separated by newlines and exit")
   parser:option("--tool-argument --arg", "Argument object to pass for tool call (in JSON format)")
   parser:option("--resource", "Immediately fetch a resource by URI, print output and exit")
   parser:option("--tag", "Only expose tools matching this tag (can be specified multiple times)"):count("*")
@@ -43,6 +44,14 @@ run_parsed_args = function(server, args)
   end
   if args.tag and #args.tag > 0 then
     server:set_visibility_by_tags(args.tag)
+  end
+  if args.list_tools then
+    local _list_0 = server:get_enabled_tools()
+    for _index_0 = 1, #_list_0 do
+      local tool = _list_0[_index_0]
+      print(tool.name)
+    end
+    return 
   end
   if args.dump_tools then
     local adapter_class = require("lapis.mcp.tool_adapter." .. tostring(args.dump_tools))
