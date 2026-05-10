@@ -212,6 +212,63 @@ Every tool registered with `@add_tool` follows the same contract:
 - A returned string becomes a single text content block. Any other return value (table, array, number, boolean) is JSON-encoded into a single text block. If the tool declares an `outputSchema` and the handler returns a table, that table is also attached as `structuredContent` on the response.
 - Return `nil, error_message` to signal a tool error. The error string is sent back to the client as an MCP error result (`isError: true`). Uncaught exceptions are not converted into tool errors and will fail the request loudly so that bugs are visible.
 
+#### Defining Input Schemas with `inputShape`
+
+Writing `inputSchema` by hand as a JSON-schema-shaped Lua table is verbose and
+gives you no runtime validation: you have to check required fields and types
+yourself inside the handler. As an alternative, pass an `inputShape` built from
+[tableshape](https://github.com/leafo/tableshape) types and the server will:
+
+1. Compile the shape into a JSON Schema and use that as the tool's `inputSchema` for `tools/list` and adapter output.
+2. Validate and transform the incoming `arguments` against the shape on every `tools/call`. If validation fails, the call returns an MCP error result (`isError: true`) with the tableshape error message and the handler is never invoked.
+3. Pass the transformed value (with defaults filled in and any tableshape transformations applied) to your handler as `params`.
+
+##### MoonScript
+
+```moonscript
+import types from require "tableshape"
+
+@add_tool {
+  name: "set_title"
+  description: "Set the title of an object"
+  inputShape: types.shape {
+    object_id: types.number
+    title: types.string
+    published: types.boolean\is_optional!
+  }
+}, (params) =>
+  -- params.object_id and params.title are guaranteed to be the right types
+  -- params.published is either a boolean or nil
+  update_title params.object_id, params.title, params.published
+  "ok"
+```
+
+##### Lua
+
+```lua
+local types = require("tableshape").types
+
+MyMcpServer:add_tool({
+  name = "set_title",
+  description = "Set the title of an object",
+  inputShape = types.shape({
+    object_id = types.number,
+    title = types.string,
+    published = types.boolean:is_optional()
+  })
+}, function(self, params)
+  update_title(params.object_id, params.title, params.published)
+  return "ok"
+end)
+```
+
+Notes:
+
+- `inputShape` and `inputSchema` are mutually exclusive in practice. If both are present, `inputShape` wins and the manually written `inputSchema` is ignored.
+- Use `types.shape` (a closed object) for the top-level schema. `types.shape` translates to `additionalProperties: false`, which matches what MCP clients expect.
+- Add a `description` to any inner type with `types.string\describe("...")` to surface a per-field description in the generated JSON Schema; the LLM sees these descriptions when deciding how to fill arguments.
+- `outputShape` works the same way for declaring the structured-output schema. When set, the generated JSON Schema is exposed as the tool's `outputSchema`, and a handler returning a table will have that table attached as `structuredContent`.
+
 ### Composing MCP Server Classes
 
 Use `@include` to build one `McpServer` class from the tools defined on other
@@ -544,10 +601,13 @@ The `run_cli` method provides several useful command-line options. You can view 
 - `--help` - Show all CLI options
 - `--debug` - Enable debug logging to stderr
 - `--skip-initialize` / `--skip-init` - Skip the initialize stage and listen for messages immediately
-- `--dump-tools <adapter>` - Print tool adapter JSON for `openai`, `anthropic`, or `gemini`, then exit
+- `--list-tools` - List all enabled tool names (one per line) and exit
+- `--dump-tools <adapter>` / `--tool-schema <adapter>` - Print tool adapter JSON for `openai`, `anthropic`, or `gemini`, then exit. Combine with `--tool <name>` to dump just one tool's schema.
 - `--tool <tool_name>` - Immediately invoke a specific tool, print output and exit
 - `--tool-argument <json>` / `--arg <json>` - Pass arguments to the tool (in JSON format)
+- `--resource <uri>` - Immediately fetch a resource by URI, print output and exit
 - `--send-message <message>` - Send a raw message and exit
+- `--tag <tag>` - Only expose tools matching this tag (can be specified multiple times)
 - `--tool-prefix <prefix>` - Prefix to prepend to all tool names
 - `--instructions <text>` - Set the server instructions
 
@@ -564,6 +624,9 @@ When using `run_cli` in a script called `my_server.lua` the following are exampl
 
 # Print OpenAI tool definitions for all enabled tools
 ./my_server.lua --dump-tools openai
+
+# List the names of all enabled tools
+./my_server.lua --list-tools
 
 # Test a specific tool
 ./my_server.lua --tool list_files --arg '{"path": "/tmp"}'
