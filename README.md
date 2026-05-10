@@ -29,6 +29,10 @@ local json = require("cjson.safe")
 local FileSystemMcpServer = McpServer:extend("FileSystemMcpServer", {
   server_name = "filesystem-mcp",
   instructions = "Tools to interact with the local filesystem"
+
+  -- optional fields:
+  -- server_version = "1.0.0", 
+  -- server_vendor = "Your Company",
 })
 
 FileSystemMcpServer:add_tool({
@@ -74,6 +78,10 @@ class FileSystemMcpServer extends McpServer
   @server_name: "filesystem-mcp"
   @instructions: [[Tools to interact with the local filesystem]]
 
+  -- optional fields:
+  -- @server_version: "1.0.0"
+  -- @server_vendor: "Your Company"
+
   @add_tool {
     name: "list_files"
     description: "Lists files in a directory"
@@ -105,44 +113,6 @@ server = FileSystemMcpServer {
 server\run_stdio!
 ```
 
-### Basic Structure
-
-#### Lua
-
-```lua
--- Import the base class
-local McpServer = require("lapis.mcp.server").McpServer
-
--- Create your custom server class
-local MyMcpServer = McpServer:extend("MyMcpServer", {
-  server_name = "my-mcp-server",
-  server_version = "1.0.0", 
-  server_vendor = "Your Company",
-  instructions = "Your server description here"
-})
-
--- Usage
-local server = MyMcpServer({debug = true})
-server:run_stdio()
-```
-
-#### MoonScript
-
-```moonscript
--- Import the base class
-import McpServer from require "lapis.mcp.server"
-
--- Create your custom server class
-class MyMcpServer extends McpServer
-  @server_name: "my-mcp-server"
-  @server_version: "1.0.0"
-  @server_vendor: "Your Company"
-  @instructions: [[Your server description here]]
-
-  new: (options = {}) =>
-    super(options)
-    -- Initialize your server-specific state
-```
 
 ### Adding Tools
 
