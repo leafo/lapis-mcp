@@ -1,5 +1,4 @@
 json = require "cjson.safe"
-oauth_shim = require "lapis.mcp.oauth"
 
 import respond_to from require "lapis.application"
 
@@ -43,9 +42,28 @@ merge_headers = (base, extra) ->
 
   out
 
+normalize_mount_path = (path) ->
+  path or= "/"
+  assert type(path) == "string", "MCP mount path must be a string"
+  assert path != "", "MCP mount path must not be empty"
+  assert path\sub(1, 1) == "/", "MCP mount path must start with /"
+  path = path\gsub "/+$", "" unless path == "/"
+  path
+
+server_class_for = (server_module) ->
+  if type(server_module) == "string"
+    require server_module
+  else
+    server_module
+
+
 mcp_handler = (ServerClass, opts={}) ->
   oauth = opts.oauth
   mount_path = opts.path or "/"
+
+  oauth_config = if oauth
+    oauth_shim = require "lapis.mcp.oauth"
+    oauth_shim.OauthConfig oauth, mount_path
 
   respond_to {
     before: =>
@@ -64,8 +82,8 @@ mcp_handler = (ServerClass, opts={}) ->
         @cors_headers = build_cors_headers origin, allowed_origin
 
       if oauth and @req.cmd_mth != "OPTIONS"
-        unless oauth_shim.verify_bearer_token oauth, @req.headers["authorization"]
-          metadata_url = oauth_shim.protected_resource_metadata_url @req, oauth, mount_path
+        unless oauth_config\verify_bearer_token @req.headers["authorization"]
+          metadata_url = oauth_config\protected_resource_metadata_url @req
           @write {
             json: {error: "unauthorized"}
             status: 401
@@ -147,22 +165,53 @@ mcp_handler = (ServerClass, opts={}) ->
       status: 405, layout: false
   }
 
-serve = (server_module, opts={}) ->
-  ServerClass = if type(server_module) == "string"
-    require server_module
-  else
-    server_module
+class McpHttpRouter
+  new: =>
+    @mounts = {}
 
+  mount: (path, server_module, opts={}) =>
+    path = normalize_mount_path path
+    opts = {k, v for k, v in pairs opts}
+    opts.path = path
+    table.insert @mounts, {
+      :path
+      ServerClass: server_class_for server_module
+      :opts
+    }
+    @
+
+  install: (app) =>
+    oauth_shim = require "lapis.mcp.oauth"
+
+    claimed = {}
+
+    claim_route = (route, owner) ->
+      if claimed[route]
+        error "MCP HTTP route collision: #{route} claimed by #{claimed[route]} and #{owner}"
+      claimed[route] = owner
+
+    for mount in *@mounts
+      owner = "MCP mount #{mount.path}"
+      claim_route mount.path, owner
+
+      if mount.opts.oauth
+        config = oauth_shim.OauthConfig mount.opts.oauth, mount.path
+        routes = config\routes!
+        for route in *routes
+          claim_route route.path, owner
+          app\match route.path, route.handler
+
+      app\match mount.path, mcp_handler mount.ServerClass, mount.opts
+
+    app
+
+serve = (server_module, opts={}) ->
   lapis = require "lapis"
 
   app = lapis.Application!
-
-  mount_path = opts.path or "/"
-
-  if opts.oauth
-    oauth_shim.register_routes app, opts.oauth, mount_path
-
-  app\match mount_path, mcp_handler ServerClass, opts
+  router = McpHttpRouter!
+  router\mount opts.path or "/", server_module, opts
+  router\install app
   lapis.serve app
 
-{:mcp_handler, :HttpNoopTransport, :serve}
+{:mcp_handler, :HttpNoopTransport, :McpHttpRouter, :serve}

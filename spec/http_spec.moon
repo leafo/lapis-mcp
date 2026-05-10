@@ -2,7 +2,7 @@ lapis = require "lapis"
 json = require "cjson"
 
 import McpServer from require "lapis.mcp.server"
-import mcp_handler from require "lapis.mcp.http"
+import mcp_handler, McpHttpRouter from require "lapis.mcp.http"
 import simulate_request from require "lapis.spec.request"
 
 class TestServer extends McpServer
@@ -14,10 +14,24 @@ class TestServer extends McpServer
     inputSchema: { type: "object", properties: {}, required: setmetatable({}, json.array_mt) }
   }, (params) => "world"
 
+class OtherTestServer extends McpServer
+  @server_name: "other-test-server"
+
 build_app = (opts) ->
   class TestApp extends lapis.Application
     layout: false
     "/mcp": mcp_handler TestServer, opts
+
+build_router_app = (mounts) ->
+  class TestApp extends lapis.Application
+    layout: false
+
+  router = McpHttpRouter!
+  for mount in *mounts
+    router\mount mount.path, mount.server or TestServer, mount.opts or {}
+  router\install TestApp
+
+  TestApp
 
 describe "mcp_handler", ->
   describe "POST", ->
@@ -354,6 +368,30 @@ describe "mcp_handler", ->
       result = json.decode body
       assert.equal 0, #result.result.tools
 
+  describe "oauth", ->
+    it "uses public base URL in bearer challenge metadata URL", ->
+      app = build_app {
+        oauth: {
+          client_id: "connector-client"
+          client_secret: "connector-secret"
+          public_base_url: "https://public.example"
+        }
+        path: "/mcp"
+      }
+
+      status, body, headers = simulate_request app, "/mcp", {
+        method: "POST"
+        headers: {
+          "Accept": "application/json, text/event-stream"
+          "Host": "internal.example"
+          "X-Forwarded-Proto": "http"
+        }
+        body: json.encode {jsonrpc: "2.0", id: 1, method: "ping"}
+      }
+
+      assert.equal 401, status
+      assert.equal 'Bearer realm="mcp", resource_metadata="https://public.example/.well-known/oauth-protected-resource/mcp"', headers["WWW-Authenticate"]
+
   describe "GET", ->
     it "returns 405", ->
       app = build_app!
@@ -371,3 +409,173 @@ describe "mcp_handler", ->
       }
 
       assert.equal 405, status
+
+describe "McpHttpRouter", ->
+  https_headers = {
+    "Host": "example.com"
+    "X-Forwarded-Proto": "https"
+  }
+
+  it "installs oauth routes under the MCP mount path", ->
+    app = build_router_app {
+      {
+        path: "/mcp"
+        opts: {
+          oauth: {
+            client_id: "one"
+            client_secret: "secret-one"
+          }
+        }
+      }
+    }
+
+    status, body = simulate_request app, "/.well-known/oauth-authorization-server/mcp", headers: https_headers
+    assert.equal 200, status
+    result = json.decode body
+    assert.equal "https://example.com/mcp/oauth/authorize", result.authorization_endpoint
+    assert.equal "https://example.com/mcp/oauth/token", result.token_endpoint
+
+    status, body = simulate_request app, "/.well-known/oauth-protected-resource/mcp", headers: https_headers
+    assert.equal 200, status
+    result = json.decode body
+    assert.equal "https://example.com/mcp", result.resource
+
+  it "installs distinct oauth routes for multiple oauth mounts", ->
+    app = build_router_app {
+      {
+        path: "/mcp-one"
+        server: TestServer
+        opts: {
+          oauth: {
+            client_id: "one"
+            client_secret: "secret-one"
+          }
+        }
+      }
+      {
+        path: "/mcp-two"
+        server: OtherTestServer
+        opts: {
+          oauth: {
+            client_id: "two"
+            client_secret: "secret-two"
+          }
+        }
+      }
+    }
+
+    status, body = simulate_request app, "/.well-known/oauth-authorization-server/mcp-one", headers: https_headers
+    assert.equal 200, status
+    result = json.decode body
+    assert.equal "https://example.com/mcp-one", result.issuer
+    assert.equal "https://example.com/mcp-one/oauth/authorize", result.authorization_endpoint
+    assert.equal "https://example.com/mcp-one/oauth/token", result.token_endpoint
+
+    status, body = simulate_request app, "/.well-known/oauth-protected-resource/mcp-two", headers: https_headers
+    assert.equal 200, status
+    result = json.decode body
+    assert.equal "https://example.com/mcp-two", result.resource
+    assert.same {"https://example.com/mcp-two"}, result.authorization_servers
+
+    status, body = simulate_request app, "/mcp-two/oauth/token", {
+      method: "POST"
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded"
+      }
+      body: "grant_type=client_credentials&client_id=two&client_secret=secret-two"
+    }
+    assert.equal 200, status
+    result = json.decode body
+    assert.equal "secret-two", result.access_token
+
+  it "scopes oauth routes when only one mount has oauth", ->
+    app = build_router_app {
+      {
+        path: "/public"
+        server: TestServer
+      }
+      {
+        path: "/mcp"
+        server: OtherTestServer
+        opts: {
+          oauth: {
+            client_id: "one"
+            client_secret: "secret-one"
+          }
+        }
+      }
+    }
+
+    status, body = simulate_request app, "/.well-known/oauth-authorization-server/mcp", headers: https_headers
+    assert.equal 200, status
+    result = json.decode body
+    assert.equal "https://example.com/mcp/oauth/token", result.token_endpoint
+
+  it "raises on route collisions", ->
+    assert.has_error ->
+      build_router_app {
+        { path: "/mcp" }
+        { path: "/mcp" }
+      }
+
+    assert.has_error ->
+      build_router_app {
+        {
+          path: "/mcp"
+          opts: {
+            oauth: {
+              client_id: "one"
+              client_secret: "secret-one"
+            }
+          }
+        }
+        {
+          path: "/mcp/oauth/token"
+        }
+      }
+
+  it "routes MCP POST requests through router-installed handlers", ->
+    app = build_router_app {
+      { path: "/mcp-one", server: TestServer }
+      { path: "/mcp-two", server: OtherTestServer }
+    }
+
+    status, body = simulate_request app, "/mcp-one", {
+      method: "POST"
+      headers: {
+        "Accept": "application/json, text/event-stream"
+        "Content-Type": "application/json"
+      }
+      body: json.encode {
+        jsonrpc: "2.0"
+        id: 1
+        method: "tools/call"
+        params: { name: "hello", arguments: {} }
+      }
+    }
+
+    assert.equal 200, status
+    result = json.decode body
+    assert.equal "world", result.result.content[1].text
+
+  it "normalizes trailing slashes on mount paths", ->
+    app = build_router_app {
+      { path: "/mcp/", server: TestServer }
+    }
+
+    status, body = simulate_request app, "/mcp", {
+      method: "POST"
+      headers: {
+        "Accept": "application/json, text/event-stream"
+        "Content-Type": "application/json"
+      }
+      body: json.encode {
+        jsonrpc: "2.0"
+        id: 1
+        method: "tools/list"
+      }
+    }
+
+    assert.equal 200, status
+    result = json.decode body
+    assert.equal "hello", result.result.tools[1].name

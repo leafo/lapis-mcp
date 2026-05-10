@@ -14,30 +14,17 @@ build_app = (path="/mcp", opts=oauth_opts) ->
   class TestApp extends lapis.Application
     layout: false
 
-  oauth_shim.register_routes TestApp, opts, path
+  config = oauth_shim.OauthConfig opts, path
+  for route in *config\routes!
+    TestApp\match route.path, route.handler
 
   TestApp
 
 describe "oauth shim", ->
-  it "serves protected resource metadata routes", ->
+  it "serves protected resource metadata route", ->
     app = build_app "/mcp"
 
-    for path in *{"/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp"}
-      status, body = simulate_request app, path, {
-        headers: {
-          "Host": "example.com"
-          "X-Forwarded-Proto": "https"
-        }
-      }
-
-      assert.equal 200, status
-      result = json.decode body
-      assert.equal "https://example.com/mcp", result.resource
-      assert.same {"https://example.com"}, result.authorization_servers
-
-  it "serves authorization server metadata", ->
-    app = build_app "/mcp"
-    status, body = simulate_request app, "/.well-known/oauth-authorization-server", {
+    status, body = simulate_request app, "/.well-known/oauth-protected-resource/mcp", {
       headers: {
         "Host": "example.com"
         "X-Forwarded-Proto": "https"
@@ -46,15 +33,79 @@ describe "oauth shim", ->
 
     assert.equal 200, status
     result = json.decode body
-    assert.equal "https://example.com", result.issuer
-    assert.equal "https://example.com/oauth/authorize", result.authorization_endpoint
-    assert.equal "https://example.com/oauth/token", result.token_endpoint
+    assert.equal "https://example.com/mcp", result.resource
+    assert.same {"https://example.com/mcp"}, result.authorization_servers
+
+  it "uses configured protected resource URL", ->
+    app = build_app "/mcp", {
+      client_id: "connector-client"
+      client_secret: "connector-secret"
+      resource: "https://resource.example/mcp"
+    }
+
+    status, body = simulate_request app, "/.well-known/oauth-protected-resource/mcp", {
+      headers: {
+        "Host": "example.com"
+        "X-Forwarded-Proto": "https"
+      }
+    }
+
+    assert.equal 200, status
+    result = json.decode body
+    assert.equal "https://resource.example/mcp", result.resource
+
+  it "uses public base URL for derived OAuth metadata URLs", ->
+    app = build_app "/mcp", {
+      client_id: "connector-client"
+      client_secret: "connector-secret"
+      public_base_url: "https://public.example"
+    }
+
+    status, body = simulate_request app, "/.well-known/oauth-protected-resource/mcp", {
+      headers: {
+        "Host": "internal.example"
+        "X-Forwarded-Proto": "http"
+      }
+    }
+
+    assert.equal 200, status
+    result = json.decode body
+    assert.equal "https://public.example/mcp", result.resource
+    assert.same {"https://public.example/mcp"}, result.authorization_servers
+
+    status, body = simulate_request app, "/.well-known/oauth-authorization-server/mcp", {
+      headers: {
+        "Host": "internal.example"
+        "X-Forwarded-Proto": "http"
+      }
+    }
+
+    assert.equal 200, status
+    result = json.decode body
+    assert.equal "https://public.example/mcp", result.issuer
+    assert.equal "https://public.example/mcp/oauth/authorize", result.authorization_endpoint
+    assert.equal "https://public.example/mcp/oauth/token", result.token_endpoint
+
+  it "serves authorization server metadata", ->
+    app = build_app "/mcp"
+    status, body = simulate_request app, "/.well-known/oauth-authorization-server/mcp", {
+      headers: {
+        "Host": "example.com"
+        "X-Forwarded-Proto": "https"
+      }
+    }
+
+    assert.equal 200, status
+    result = json.decode body
+    assert.equal "https://example.com/mcp", result.issuer
+    assert.equal "https://example.com/mcp/oauth/authorize", result.authorization_endpoint
+    assert.equal "https://example.com/mcp/oauth/token", result.token_endpoint
     assert.same {"client_secret_post", "client_secret_basic"}, result.token_endpoint_auth_methods_supported
 
   it "serves authorization redirects", ->
     app = build_app "/mcp"
     redirect_uri = "https://client.example/callback"
-    status, body, headers = simulate_request app, "/oauth/authorize?#{encode_query_string {
+    status, body, headers = simulate_request app, "/mcp/oauth/authorize?#{encode_query_string {
       response_type: "code"
       client_id: "connector-client"
       redirect_uri: redirect_uri
@@ -70,7 +121,7 @@ describe "oauth shim", ->
 
   it "serves token endpoint preflight", ->
     app = build_app "/mcp"
-    status, body, headers = simulate_request app, "/oauth/token", {
+    status, body, headers = simulate_request app, "/mcp/oauth/token", {
       method: "OPTIONS"
     }
 

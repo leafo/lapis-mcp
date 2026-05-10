@@ -234,6 +234,14 @@ end)
   }
 ```
 
+#### Tool Handler Semantics
+
+Every tool registered with `@add_tool` follows the same contract:
+
+- Handlers are called with the `McpServer` instance as `self` and a single `params` argument (`function(self, params)` in Lua, `(params) =>` in MoonScript). `params` is the JSON-decoded `arguments` table from the tool call.
+- A returned string becomes a single text content block. Any other return value (table, array, number, boolean) is JSON-encoded into a single text block. If the tool declares an `outputSchema` and the handler returns a table, that table is also attached as `structuredContent` on the response.
+- Return `nil, error_message` to signal a tool error. The error string is sent back to the client as an MCP error result (`isError: true`). Uncaught exceptions are not converted into tool errors and will fail the request loudly so that bugs are visible.
+
 ### Composing MCP Server Classes
 
 Use `@include` to build one `McpServer` class from the tools defined on other
@@ -521,7 +529,7 @@ For stdio transport there are two interfaces to starting the server:
 - `mcp_server:run_stdio()` - Instance method that immediately starts the server loop over stdin and writes to stdout. Input must follow the MCP protocol to be handled correctly.
 - `McpServer:run_cli()` - Class method that will instantiate your MCP server with argparse based configuration and debug tools, then immediately starts the stdio loop via `run_stdio`. Use the `--help` command to learn more about what's available.
 
-#### Programatic Execution
+#### Programmatic Execution
 
 ##### Lua
 
@@ -540,9 +548,6 @@ server\run_stdio()
 ```
 
 #### CLI Execution
-
-The `run_cli` class method that exposes the server of stdio transport with
-argument based configuration via `argparse`.
 
 ##### Lua
 
@@ -605,16 +610,18 @@ When using `run_cli` in a script called `my_server.lua` the following are exampl
 
 ### Running Over HTTP
 
-Use `lapis.mcp.http.mcp_handler` to mount an MCP endpoint in a Lapis
-application. The handler creates a fresh `McpServer` instance for each request,
-so HTTP mode is stateless unless you restore state yourself.
+Use `lapis.mcp.http.McpHttpRouter` to mount one or more MCP endpoints in a
+Lapis application. The router installs the MCP route and any OAuth companion
+routes together, so multi-tenant apps cannot accidentally forget shared
+metadata or token routes. Each handler creates a fresh `McpServer` instance for
+each request, so HTTP mode is stateless unless you restore state yourself.
 
 #### Lua
 
 ```lua
 local lapis = require("lapis")
 local McpServer = require("lapis.mcp.server").McpServer
-local mcp_handler = require("lapis.mcp.http").mcp_handler
+local McpHttpRouter = require("lapis.mcp.http").McpHttpRouter
 
 local MyMcpServer = McpServer:extend("MyMcpServer", {
   server_name = "my-http-server"
@@ -633,12 +640,14 @@ MyMcpServer:add_tool({
 end)
 
 local app = lapis.Application()
+local router = McpHttpRouter()
 
-app:match("/mcp", mcp_handler(MyMcpServer, {
+router:mount("/mcp", MyMcpServer, {
   allowed_origins = {
     "https://example.com"
   }
-}))
+})
+router:install(app)
 
 return app
 ```
@@ -649,7 +658,7 @@ return app
 lapis = require "lapis"
 
 import McpServer from require "lapis.mcp.server"
-import mcp_handler from require "lapis.mcp.http"
+import McpHttpRouter from require "lapis.mcp.http"
 
 class MyMcpServer extends McpServer
   @server_name: "my-http-server"
@@ -665,12 +674,16 @@ class MyMcpServer extends McpServer
   }, (params) =>
     "world"
 
-class App extends lapis.Application
-  "/mcp": mcp_handler MyMcpServer, {
-    allowed_origins: {
-      "https://example.com"
-    }
+router = McpHttpRouter!
+router\mount "/mcp", MyMcpServer, {
+  allowed_origins: {
+    "https://example.com"
   }
+}
+
+class App extends lapis.Application
+
+router\install App
 ```
 
 HTTP mode accepts `POST` requests for MCP messages and `OPTIONS` requests for
@@ -686,17 +699,57 @@ back to the client, you'll want a fuller transport.
 
 #### HTTP Handler Options
 
-The second argument to `mcp_handler(ServerClass, opts)` accepts these options:
+The third argument to `router:mount(path, ServerClass, opts)` accepts these
+options:
 
 - `allowed_origins` - Either `"*"` or an array of allowed origins. If an `Origin` header is present and not allowed, the handler returns `403`.
 - `server_options` - Passed to `ServerClass(...)` each time a request creates a new server instance.
 - `load_session(req, server)` - Optional callback invoked after the server instance is created. Use this to restore per-session state, customize visibility, or apply authentication-derived state to the server.
 - `create_session_id(req, server)` - Optional callback invoked for `initialize` requests. If it returns a value, it is written to the `Mcp-Session-Id` response header.
+- `oauth` - Optional table that turns on the OAuth shim for this mount; see [Authenticating with OAuth](#authenticating-with-oauth-service-tokens).
 
 Because HTTP mode is stateless, any authentication or session persistence is up
 to the surrounding Lapis application and these callbacks. For example, you can
 perform your own auth checks before the route runs, then use `load_session` to
 restore the server state associated with the current request.
+
+#### Multiple HTTP MCP Apps
+
+Register each MCP endpoint with one router, then install it into the Lapis
+application:
+
+```moonscript
+import McpHttpRouter from require "lapis.mcp.http"
+
+router = McpHttpRouter!
+router\mount "/mcp-one", TenantOneServer, {
+  oauth: {
+    client_id: "tenant-one"
+    client_secret: "..."
+  }
+  -- server_options: ...
+}
+
+router\mount "/mcp-two", TenantTwoServer, {
+  oauth: {
+    client_id: "tenant-two"
+    client_secret: "..."
+  }
+  -- server_options: ...
+}
+
+router\install App
+```
+
+OAuth routes are always scoped by mount path:
+
+- `GET /.well-known/oauth-protected-resource/mcp-one`
+- `GET /.well-known/oauth-authorization-server/mcp-one`
+- `GET /mcp-one/oauth/authorize`
+- `POST /mcp-one/oauth/token`
+
+The router raises an error during `install` if two MCP mounts or generated
+OAuth routes would collide.
 
 #### HTTP serve
 
@@ -705,11 +758,11 @@ app, `lapis.mcp.http` provides a `serve(server_module, opts)` helper that
 mirrors `lapis.serve`.
 
 `server_module` is either a Lua module name that returns an MCP server class or
-the class itself. The helper builds an anonymous Lapis application, mounts
-`mcp_handler(ServerClass, opts)` at `opts.path` (default `"/"`), and hands the
-app off to `lapis.serve`. Any other keys in `opts` (`allowed_origins`,
-`server_options`, `load_session`, `create_session_id`) are forwarded to
-`mcp_handler`.
+the class itself. The helper builds an anonymous Lapis application, mounts the
+server through `McpHttpRouter` at `opts.path` (default `"/"`), and hands the app
+off to `lapis.serve`. The remaining keys in `opts` (`allowed_origins`,
+`server_options`, `load_session`, `create_session_id`, `oauth`) are forwarded
+to the mount.
 
 
 With OpenResty: 
@@ -737,30 +790,43 @@ move the location (`location /mcp { ... }`) or pass `{path = "/mcp"}` to
 #### Authenticating with OAuth (Service Tokens)
 
 To make a remote MCP server compatible with Claude.ai's custom connectors (or
-any client that expects OAuth-protected MCP endpoints), `serve` can install a
-minimal OAuth shim that gates access behind a static service token. There is
-no real login flow. The shim just satisfies the OAuth protocol surface so the
-client can complete an authorization round-trip and obtain a bearer token.
+any client that expects OAuth-protected MCP endpoints), pass `oauth` in the
+options to `router:mount` (or `serve`) to install a minimal OAuth shim that
+gates access behind a static service token. There is no real login flow. The
+shim just satisfies the OAuth protocol surface so the client can complete an
+authorization round-trip and obtain a bearer token.
 
-When `opts.oauth` is set, `serve` registers these routes alongside the MCP
-endpoint:
+When a mount has `oauth`, the router registers these routes alongside the MCP
+endpoint, scoped to the mount path:
 
-- `GET /.well-known/oauth-protected-resource` (RFC 9728)
-- `GET /.well-known/oauth-protected-resource{mount_path}` — also registered when the MCP endpoint is mounted at a non-root path (per RFC 9728 §3, clients probe the path-suffixed form)
-- `GET /.well-known/oauth-authorization-server` (RFC 8414)
-- `GET /oauth/authorize`
-- `POST /oauth/token`
+- `GET /.well-known/oauth-protected-resource{mount_path}` (RFC 9728)
+- `GET /.well-known/oauth-authorization-server{mount_path}` (RFC 8414)
+- `GET {mount_path}/oauth/authorize`
+- `POST {mount_path}/oauth/token`
 
 The MCP endpoint requires `Authorization: Bearer <token>` and returns 401 with
 a `WWW-Authenticate` header pointing at the resource metadata when missing or
 invalid. Clients discover the authorization server, run the
 `authorization_code` flow with PKCE (auto-approved with no UI), and exchange
-the resulting code for an access token at `/oauth/token`. The
+the resulting code for an access token at `{mount_path}/oauth/token`. The
 `client_credentials` grant is also supported. The token endpoint accepts
 client credentials either as POST body parameters (`client_secret_post`) or as
 an `Authorization: Basic` header (`client_secret_basic`). Auth codes are
 stateless HMAC-signed payloads using `client_secret`, so no storage is
 required between the `/authorize` and `/token` requests.
+
+Direct router usage:
+
+```moonscript
+router\mount "/mcp", MyMcpServer, {
+  oauth: {
+    client_id: "claude-connector"
+    client_secret: "your-shared-secret"
+  }
+}
+```
+
+Or, for the standalone `serve` case, under OpenResty:
 
 ```nginx
 location / {
@@ -771,7 +837,8 @@ location / {
         client_secret = "your-shared-secret"
         -- access_token = "...",                  -- defaults to client_secret
         -- access_token_ttl = 3600,
-        -- issuer = "https://you.example.com",   -- derived from request if omitted
+        -- public_base_url = "https://you.example.com", -- derived from request if omitted
+        -- issuer = "https://you.example.com/mcp", -- defaults to public_base_url plus mount path
       }
     })
   }
@@ -786,12 +853,13 @@ configured `access_token` to Claude, which sends it back as
 
 ##### OAuth Options
 
-- `client_id` (required) — must match what the client sends.
-- `client_secret` (required) — verified at the token endpoint and used as the HMAC key for stateless auth codes.
-- `access_token` (optional) — the bearer token returned to the client and accepted on the MCP endpoint. Defaults to `client_secret`.
-- `access_token_ttl` (optional) — `expires_in` returned at the token endpoint. Defaults to `3600`.
-- `issuer` (optional) — issuer URL exposed in the metadata documents. Derived from the request `Host` (and `X-Forwarded-Proto`/`X-Forwarded-Host`) when omitted.
-- `resource` (optional) — resource URL exposed in the protected-resource metadata. Defaults to the request's base URL joined with the MCP mount path (e.g. `https://host/mcp` when mounted at `/mcp`); coincides with the issuer only when the MCP endpoint is mounted at the root.
+- `client_id` (required): must match what the client sends.
+- `client_secret` (required): verified at the token endpoint and used as the HMAC key for stateless auth codes.
+- `access_token` (optional): the bearer token returned to the client and accepted on the MCP endpoint. Defaults to `client_secret`.
+- `access_token_ttl` (optional): `expires_in` returned at the token endpoint. Defaults to `3600`.
+- `public_base_url` (optional): public base URL used to derive metadata URLs, issuer, and resource when those values are not explicitly configured. Defaults to the request `Host` (and `X-Forwarded-Proto`/`X-Forwarded-Host`) when omitted.
+- `issuer` (optional): issuer URL exposed in the metadata documents. Defaults to `public_base_url` joined with the MCP mount path.
+- `resource` (optional): resource URL exposed in the protected-resource metadata. Defaults to `public_base_url` joined with the MCP mount path (e.g. `https://host/mcp` when mounted at `/mcp`), matching the default `issuer`.
 
 Because this is a service-token shim and not real user authentication, anyone
 with the configured `client_secret` (or `access_token`) can call the MCP
@@ -821,7 +889,7 @@ lapis mcp my.project.mcp_server
 
 The shared CLI flags described in [Running Your Server](#running-your-server)
 (`--debug`, `--tool`, `--dump-tools`, `--send-message`, `--tag`, etc.) all
-work the same here — internally `lapis mcp` dispatches through the same
+work the same here. Internally `lapis mcp` dispatches through the same
 argparse-driven runner that `McpServer:run_cli` uses for standalone scripts.
 
 ## Bundled Lapis MCP Server
@@ -839,19 +907,19 @@ It resolves the project's Lapis application on demand (via
 then to `app`). Because the MCP server is
 long-lived but the application source on disk is expected to change between
 calls, every tool that touches the app (`list_routes`, `simulate`)
-re-`require`s it from scratch — the modules pulled into `package.loaded`
+re-`require`s it from scratch. The modules pulled into `package.loaded`
 during a call are tracked and purged before the next call, and
 `lapis.config`'s internal cache is reset, so edits to app, model, view, and
 config files take effect immediately without restarting the server.
 
 It exposes:
 
-- **list_routes** — lists all named routes in the application's router
-- **list_models** — lists database model files found under `models/`
-- **simulate** — issues a fake HTTP request through the loaded app (via `lapis.spec.request.simulate_request`) and returns the response status, headers, and body. Accepts `path` (required), `method`, `body`, `headers`, `host`, and `scheme`. Cookies set by the app via `Set-Cookie` are automatically captured into a per-session jar and replayed on subsequent calls, so an agent can log in and then make authenticated requests as the same user.
-- **list_cookies** — returns the current contents of the cookie jar as a sorted array of `[name, value]` pairs.
-- **clear_cookies** — empties the cookie jar.
-- **schema** *(optional, only registered when [`lapis-annotate`](https://github.com/leafo/lapis-annotate) is installed)* — given a list of model class names, dumps each model's PostgreSQL schema (CREATE TABLE plus indexes/constraints) by shelling out to `pg_dump` with the project's `config.postgres` credentials.
+- **list_routes**: lists all named routes in the application's router
+- **list_models**: lists database model files found under `models/`
+- **simulate**: issues a fake HTTP request through the loaded app (via `lapis.spec.request.simulate_request`) and returns the response status, headers, and body. Accepts `path` (required), `method`, `body`, `headers`, `host`, and `scheme`. Cookies set by the app via `Set-Cookie` are automatically captured into a per-session jar and replayed on subsequent calls, so an agent can log in and then make authenticated requests as the same user.
+- **list_cookies**: returns the current contents of the cookie jar as a sorted array of `[name, value]` pairs.
+- **clear_cookies**: empties the cookie jar.
+- **schema** *(optional, only registered when [`lapis-annotate`](https://github.com/leafo/lapis-annotate) is installed)*: given a list of model class names, dumps each model's PostgreSQL schema (CREATE TABLE plus indexes/constraints) by shelling out to `pg_dump` with the project's `config.postgres` credentials.
 
 ## License
 
