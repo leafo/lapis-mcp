@@ -8,11 +8,11 @@
 json = require "cjson.safe"
 
 import respond_to from require "lapis.application"
-import encode_with_secret, decode_with_secret, decode_base64 from require "lapis.util.encoding"
+import encode_base64, encode_with_secret, decode_with_secret, decode_base64 from require "lapis.util.encoding"
 import encode_query_string, unescape from require "lapis.util"
 
 base64url_no_pad = (s) ->
-  encoded = ngx.encode_base64 s
+  encoded = encode_base64 s
   (encoded\gsub("+", "-")\gsub("/", "_")\gsub("=", ""))
 
 verify_pkce = (verifier, challenge, method="plain") ->

@@ -1,10 +1,10 @@
 local json = require("cjson.safe")
 local respond_to
 respond_to = require("lapis.application").respond_to
-local encode_with_secret, decode_with_secret, decode_base64
+local encode_base64, encode_with_secret, decode_with_secret, decode_base64
 do
   local _obj_0 = require("lapis.util.encoding")
-  encode_with_secret, decode_with_secret, decode_base64 = _obj_0.encode_with_secret, _obj_0.decode_with_secret, _obj_0.decode_base64
+  encode_base64, encode_with_secret, decode_with_secret, decode_base64 = _obj_0.encode_base64, _obj_0.encode_with_secret, _obj_0.decode_with_secret, _obj_0.decode_base64
 end
 local encode_query_string, unescape
 do
@@ -13,7 +13,7 @@ do
 end
 local base64url_no_pad
 base64url_no_pad = function(s)
-  local encoded = ngx.encode_base64(s)
+  local encoded = encode_base64(s)
   return (encoded:gsub("+", "-"):gsub("/", "_"):gsub("=", ""))
 end
 local verify_pkce
