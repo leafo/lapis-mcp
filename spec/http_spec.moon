@@ -392,6 +392,85 @@ describe "mcp_handler", ->
       assert.equal 401, status
       assert.equal 'Bearer realm="mcp", resource_metadata="https://public.example/.well-known/oauth-protected-resource/mcp"', headers["WWW-Authenticate"]
 
+  describe "bearer_token", ->
+    body = json.encode {jsonrpc: "2.0", id: 1, method: "ping"}
+    accept_headers = {
+      "Accept": "application/json, text/event-stream"
+    }
+
+    it "rejects requests with no Authorization header", ->
+      app = build_app {
+        bearer_token: "shared-secret"
+      }
+
+      status, _, headers = simulate_request app, "/mcp", {
+        method: "POST"
+        headers: accept_headers
+        :body
+      }
+
+      assert.equal 401, status
+      assert.equal 'Bearer realm="mcp"', headers["WWW-Authenticate"]
+
+    it "rejects requests with the wrong bearer", ->
+      app = build_app {
+        bearer_token: "shared-secret"
+      }
+
+      status = simulate_request app, "/mcp", {
+        method: "POST"
+        headers: {
+          "Accept": "application/json, text/event-stream"
+          "Authorization": "Bearer wrong"
+        }
+        :body
+      }
+
+      assert.equal 401, status
+
+    it "allows requests with the configured bearer", ->
+      app = build_app {
+        bearer_token: "shared-secret"
+      }
+
+      status, response_body = simulate_request app, "/mcp", {
+        method: "POST"
+        headers: {
+          "Accept": "application/json, text/event-stream"
+          "Authorization": "bearer shared-secret"
+        }
+        :body
+      }
+
+      assert.equal 200, status
+      assert.equal "2.0", (json.decode response_body).jsonrpc
+
+    it "accepts a case-insensitive bearer scheme", ->
+      app = build_app {
+        bearer_token: "shared-secret"
+      }
+
+      status = simulate_request app, "/mcp", {
+        method: "POST"
+        headers: {
+          "Accept": "application/json, text/event-stream"
+          "Authorization": "BEARER shared-secret"
+        }
+        :body
+      }
+
+      assert.equal 200, status
+
+    it "errors when both oauth and bearer_token are configured", ->
+      assert.has_error ->
+        build_app {
+          bearer_token: "shared-secret"
+          oauth: {
+            client_id: "connector-client"
+            client_secret: "connector-secret"
+          }
+        }
+
   describe "GET", ->
     it "returns 405", ->
       app = build_app!

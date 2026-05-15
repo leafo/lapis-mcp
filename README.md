@@ -739,12 +739,14 @@ options:
 - `server_options` - Passed to `ServerClass(...)` each time a request creates a new server instance.
 - `load_session(req, server)` - Optional callback invoked after the server instance is created. Use this to restore per-session state, customize visibility, or apply authentication-derived state to the server.
 - `create_session_id(req, server)` - Optional callback invoked for `initialize` requests. If it returns a value, it is written to the `Mcp-Session-Id` response header.
+- `bearer_token` - Optional static bearer token required on MCP endpoint requests; see [Authenticating with a Static Bearer Token](#authenticating-with-a-static-bearer-token).
 - `oauth` - Optional table that turns on the OAuth shim for this mount; see [Authenticating with OAuth](#authenticating-with-oauth-service-tokens).
 
 Because HTTP mode is stateless, any authentication or session persistence is up
 to the surrounding Lapis application and these callbacks. For example, you can
 perform your own auth checks before the route runs, then use `load_session` to
 restore the server state associated with the current request.
+`bearer_token` and `oauth` are mutually exclusive.
 
 #### Multiple HTTP MCP Apps
 
@@ -794,8 +796,8 @@ mirrors `lapis.serve`.
 the class itself. The helper builds an anonymous Lapis application, mounts the
 server through `McpHttpRouter` at `opts.path` (default `"/"`), and hands the app
 off to `lapis.serve`. The remaining keys in `opts` (`allowed_origins`,
-`server_options`, `load_session`, `create_session_id`, `oauth`) are forwarded
-to the mount.
+`server_options`, `load_session`, `create_session_id`, `bearer_token`, `oauth`)
+are forwarded to the mount.
 
 
 With OpenResty: 
@@ -819,6 +821,35 @@ responds to `POST` (plus `OPTIONS` for CORS preflight), so it is safe to mount
 at the root of a location block. If you would rather expose it under a path,
 move the location (`location /mcp { ... }`) or pass `{path = "/mcp"}` to
 `serve` and front it with a broader `location /`.
+
+#### Authenticating with a Static Bearer Token
+
+For clients that can send a pre-shared token directly, pass `bearer_token` in
+the options to `router:mount` or `serve`. The MCP endpoint requires
+`Authorization: Bearer <token>` on every non-`OPTIONS` request and returns
+`401` with `WWW-Authenticate: Bearer realm="mcp"` when the header is missing or
+invalid.
+
+```moonscript
+router\mount "/mcp", MyMcpServer, {
+  bearer_token: "your-shared-secret"
+}
+```
+
+Or, for the standalone `serve` case:
+
+```nginx
+location / {
+  content_by_lua_block {
+    require("lapis.mcp.http").serve("my.mcp.server", {
+      bearer_token = "your-shared-secret"
+    })
+  }
+}
+```
+
+This mode does not install OAuth discovery, authorization, or token routes. Use
+`oauth` instead when a client expects an OAuth authorization flow.
 
 #### Authenticating with OAuth (Service Tokens)
 

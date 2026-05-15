@@ -57,8 +57,18 @@ server_class_for = (server_module) ->
     server_module
 
 
+verify_static_bearer = (header, expected) ->
+  return false unless header and expected
+  scheme, token = header\match "^(%S+)%s+(.+)$"
+  return false unless scheme and scheme\lower! == "bearer"
+  return false unless token
+  token == expected
+
 mcp_handler = (ServerClass, opts={}) ->
   oauth = opts.oauth
+  bearer_token = opts.bearer_token
+  assert not (oauth and bearer_token), "MCP mount cannot set both 'oauth' and 'bearer_token'"
+
   mount_path = opts.path or "/"
 
   oauth_config = if oauth
@@ -81,17 +91,28 @@ mcp_handler = (ServerClass, opts={}) ->
           return
         @cors_headers = build_cors_headers origin, allowed_origin
 
-      if oauth and @req.cmd_mth != "OPTIONS"
-        unless oauth_config\verify_bearer_token @req.headers["authorization"]
-          metadata_url = oauth_config\protected_resource_metadata_url @req
-          @write {
-            json: {error: "unauthorized"}
-            status: 401
-            headers: merge_headers @cors_headers, {
-              ["WWW-Authenticate"]: "Bearer realm=\"mcp\", resource_metadata=\"#{metadata_url}\""
+      if @req.cmd_mth != "OPTIONS"
+        if oauth
+          unless oauth_config\verify_bearer_token @req.headers["authorization"]
+            metadata_url = oauth_config\protected_resource_metadata_url @req
+            @write {
+              json: {error: "unauthorized"}
+              status: 401
+              headers: merge_headers @cors_headers, {
+                ["WWW-Authenticate"]: "Bearer realm=\"mcp\", resource_metadata=\"#{metadata_url}\""
+              }
             }
-          }
-          return
+            return
+        elseif bearer_token
+          unless verify_static_bearer @req.headers["authorization"], bearer_token
+            @write {
+              json: {error: "unauthorized"}
+              status: 401
+              headers: merge_headers @cors_headers, {
+                ["WWW-Authenticate"]: "Bearer realm=\"mcp\""
+              }
+            }
+            return
 
       -- Create fresh server instance for this request
       server = ServerClass opts.server_options or {}

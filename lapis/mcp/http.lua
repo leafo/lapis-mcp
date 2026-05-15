@@ -97,12 +97,28 @@ server_class_for = function(server_module)
     return server_module
   end
 end
+local verify_static_bearer
+verify_static_bearer = function(header, expected)
+  if not (header and expected) then
+    return false
+  end
+  local scheme, token = header:match("^(%S+)%s+(.+)$")
+  if not (scheme and scheme:lower() == "bearer") then
+    return false
+  end
+  if not (token) then
+    return false
+  end
+  return token == expected
+end
 local mcp_handler
 mcp_handler = function(ServerClass, opts)
   if opts == nil then
     opts = { }
   end
   local oauth = opts.oauth
+  local bearer_token = opts.bearer_token
+  assert(not (oauth and bearer_token), "MCP mount cannot set both 'oauth' and 'bearer_token'")
   local mount_path = opts.path or "/"
   local oauth_config
   if oauth then
@@ -128,19 +144,34 @@ mcp_handler = function(ServerClass, opts)
         end
         self.cors_headers = build_cors_headers(origin, allowed_origin)
       end
-      if oauth and self.req.cmd_mth ~= "OPTIONS" then
-        if not (oauth_config:verify_bearer_token(self.req.headers["authorization"])) then
-          local metadata_url = oauth_config:protected_resource_metadata_url(self.req)
-          self:write({
-            json = {
-              error = "unauthorized"
-            },
-            status = 401,
-            headers = merge_headers(self.cors_headers, {
-              ["WWW-Authenticate"] = "Bearer realm=\"mcp\", resource_metadata=\"" .. tostring(metadata_url) .. "\""
+      if self.req.cmd_mth ~= "OPTIONS" then
+        if oauth then
+          if not (oauth_config:verify_bearer_token(self.req.headers["authorization"])) then
+            local metadata_url = oauth_config:protected_resource_metadata_url(self.req)
+            self:write({
+              json = {
+                error = "unauthorized"
+              },
+              status = 401,
+              headers = merge_headers(self.cors_headers, {
+                ["WWW-Authenticate"] = "Bearer realm=\"mcp\", resource_metadata=\"" .. tostring(metadata_url) .. "\""
+              })
             })
-          })
-          return 
+            return 
+          end
+        elseif bearer_token then
+          if not (verify_static_bearer(self.req.headers["authorization"], bearer_token)) then
+            self:write({
+              json = {
+                error = "unauthorized"
+              },
+              status = 401,
+              headers = merge_headers(self.cors_headers, {
+                ["WWW-Authenticate"] = "Bearer realm=\"mcp\""
+              })
+            })
+            return 
+          end
         end
       end
       local server = ServerClass(opts.server_options or { })
