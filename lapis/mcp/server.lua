@@ -795,7 +795,10 @@ do
       }))
       return table.concat(buffer.buffer)
     end,
-    run_stdio = function(self)
+    run_stdio = function(self, opts)
+      if opts == nil then
+        opts = { }
+      end
       self:debug_log("info", table.concat({
         "Starting MCP server " .. tostring(self:get_server_name()) .. " in stdio mode",
         (function()
@@ -822,7 +825,29 @@ do
             _continue_0 = true
             break
           end
-          local response = self:handle_message(message)
+          local response
+          if opts.capture_errors then
+            local ok, result = xpcall((function()
+              return self:handle_message(message)
+            end), function(err)
+              io.stderr:write("[mcp] Uncaught error in handle_message:\n" .. tostring(debug.traceback(tostring(err), 2)) .. "\n")
+              return nil
+            end)
+            if ok then
+              response = result
+            else
+              response = {
+                jsonrpc = "2.0",
+                id = message.id,
+                error = {
+                  code = -32603,
+                  message = "Internal error"
+                }
+              }
+            end
+          else
+            response = self:handle_message(message)
+          end
           if response then
             self:write_json_chunk(response)
           end

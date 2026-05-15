@@ -800,7 +800,7 @@ class McpServer
     table.concat buffer.buffer
 
   -- Server main loop
-  run_stdio: =>
+  run_stdio: (opts={}) =>
     @debug_log "info", table.concat {
       "Starting MCP server #{@get_server_name!} in stdio mode"
       if @initialized
@@ -823,7 +823,23 @@ class McpServer
         @debug_log "warning", "Malformed message received: not valid JSON, ignoring..."
         continue
 
-      response = @handle_message message
+      response = if opts.capture_errors
+        ok, result = xpcall (-> @handle_message message),
+          (err) ->
+            io.stderr\write "[mcp] Uncaught error in handle_message:\n#{debug.traceback tostring(err), 2}\n"
+            nil
+
+        if ok
+          result
+        else
+          {
+            jsonrpc: "2.0"
+            id: message.id
+            error: { code: -32603, message: "Internal error" }
+          }
+      else
+        @handle_message message
+
       if response
         @write_json_chunk response
 

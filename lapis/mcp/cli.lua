@@ -149,7 +149,9 @@ run_parsed_args = function(server, args)
   if args.skip_initialize or args.tool or args.resource then
     server:skip_initialize()
   end
-  return server:run_stdio()
+  return server:run_stdio({
+    capture_errors = true
+  })
 end
 local run_cli
 run_cli = function(ServerClass, config)

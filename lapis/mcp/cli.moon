@@ -158,7 +158,7 @@ run_parsed_args = (server, args) ->
     server\skip_initialize!
 
   -- Run server normally
-  server\run_stdio!
+  server\run_stdio capture_errors: true
 
 -- Generic CLI runner using argparse
 run_cli = (ServerClass, config={}) ->
