@@ -382,12 +382,9 @@ describe "OpenAIToolAdapter", ->
           function: {
             name: "simple-tool"
             description: "A tool with no parameters"
-            strict: true
             parameters: {
               type: "object"
               properties: {}
-              required: setmetatable {}, json.array_mt
-              additionalProperties: false
             }
           }
         }
@@ -429,7 +426,6 @@ describe "OpenAIToolAdapter", ->
           function: {
             name: "required-params-tool"
             description: "A tool with required parameters"
-            strict: true
             parameters: {
               type: "object"
               properties: {
@@ -442,8 +438,7 @@ describe "OpenAIToolAdapter", ->
                   description: "User age"
                 }
               }
-              required: {"age", "name"}
-              additionalProperties: false
+              required: {"name", "age"}
             }
           }
         }
@@ -477,8 +472,39 @@ describe "OpenAIToolAdapter", ->
       server = TestServer!
       tool_interface = OpenAIToolAdapter(server)
 
-    it "should require all fields and mark optional fields nullable", ->
+    it "should include only required fields in required array by default", ->
       openai_tools = tool_interface\to_tools!
+
+      expected = {
+        {
+          type: "function"
+          function: {
+            name: "mixed-params-tool"
+            description: "A tool with mixed parameters"
+            parameters: {
+              type: "object"
+              properties: {
+                required_field: {
+                  type: "string"
+                  description: "Required field"
+                }
+                optional_field: {
+                  type: "string"
+                  description: "Optional field"
+                  default: "default-value"
+                }
+              }
+              required: {"required_field"}
+            }
+          }
+        }
+      }
+
+      assert.same expected, openai_tools
+
+    it "should require all fields and mark optional fields nullable in strict mode", ->
+      strict_interface = OpenAIToolAdapter tool_interface.server, strict: true
+      openai_tools = strict_interface\to_tools!
 
       expected = {
         {
@@ -546,7 +572,6 @@ describe "OpenAIToolAdapter", ->
           function: {
             name: "typed-params-tool"
             description: "A tool with various parameter types"
-            strict: true
             parameters: {
               type: "object"
               properties: {
@@ -555,16 +580,15 @@ describe "OpenAIToolAdapter", ->
                   description: "A string parameter"
                 }
                 num_param: {
-                  type: {"number", "null"}
+                  type: "number"
                   description: "A number parameter"
                 }
                 bool_param: {
-                  type: {"boolean", "null"}
+                  type: "boolean"
                   description: "A boolean parameter"
                 }
               }
-              required: {"bool_param", "num_param", "str_param"}
-              additionalProperties: false
+              required: {"str_param"}
             }
           }
         }
@@ -1269,7 +1293,6 @@ describe "complex realistic scenarios", ->
         function: {
           name: "db-query"
           description: "Execute a database query"
-          strict: true
           parameters: {
             type: "object"
             properties: {
@@ -1280,21 +1303,19 @@ describe "complex realistic scenarios", ->
               where: {
                 type: "object"
                 description: "WHERE conditions"
-                properties: {}
-                required: setmetatable {}, json.array_mt
-                additionalProperties: false
               }
               limit: {
-                type: {"number", "null"}
+                type: "number"
                 description: "Result limit"
+                default: 10
               }
               offset: {
-                type: {"number", "null"}
+                type: "number"
                 description: "Result offset"
+                default: 0
               }
             }
-            required: {"limit", "offset", "table", "where"}
-            additionalProperties: false
+            required: {"table", "where"}
           }
         }
       }

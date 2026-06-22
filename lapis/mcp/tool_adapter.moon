@@ -8,10 +8,11 @@ class ToolAdapter
   subclass_responsibility: (method_name) =>
     error "subclass responsibility: implement #{method_name}"
 
-  new: (mcp_server) =>
+  new: (mcp_server, options={}) =>
     unless mcp_server
       error "ToolAdapter requires an MCP server instance"
     @server = mcp_server
+    @options = options
 
   -- Normalize an MCP tool schema for provider-specific wrappers
   normalized_schema: (tool) =>

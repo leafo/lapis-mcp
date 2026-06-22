@@ -109,17 +109,25 @@ do
   local _parent_0 = ToolAdapter
   local _base_0 = {
     normalized_schema = function(self, tool)
-      return strict_schema_node(_class_0.__parent.__base.normalized_schema(self, tool))
+      local schema = _class_0.__parent.__base.normalized_schema(self, tool)
+      if self.options.strict then
+        return strict_schema_node(schema)
+      else
+        return schema
+      end
     end,
     convert_tool = function(self, tool)
+      local function_def = {
+        name = tool.name,
+        description = tool.description,
+        parameters = self:normalized_schema(tool)
+      }
+      if self.options.strict then
+        function_def.strict = true
+      end
       return {
         type = "function",
-        ["function"] = {
-          name = tool.name,
-          description = tool.description,
-          parameters = self:normalized_schema(tool),
-          strict = true
-        }
+        ["function"] = function_def
       }
     end,
     extract_tool_calls = function(self, message)

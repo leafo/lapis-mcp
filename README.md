@@ -452,6 +452,13 @@ messages = adapter\process_tool_calls response
 -- Returns OpenAI `role: "tool"` messages ready to append back to the conversation
 ```
 
+OpenAI tool schemas preserve the original MCP schema shape by default. To emit
+schemas with OpenAI strict mode enabled, pass `strict: true`:
+
+```moonscript
+adapter = OpenAIToolAdapter server, strict: true
+```
+
 See [`examples/tool_adapter_example.moon`](https://github.com/leafo/lapis-mcp/blob/master/examples/tool_adapter_example.moon) for a complete OpenAI loop.
 
 #### Anthropic

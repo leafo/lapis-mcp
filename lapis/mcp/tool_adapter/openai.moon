@@ -83,17 +83,25 @@ strict_schema_node = (schema, nullable=false) ->
 
 class OpenAIToolAdapter extends ToolAdapter
   normalized_schema: (tool) =>
-    strict_schema_node super tool
+    schema = super tool
+    if @options.strict
+      strict_schema_node schema
+    else
+      schema
 
   convert_tool: (tool) =>
+    function_def = {
+      name: tool.name
+      description: tool.description
+      parameters: @normalized_schema tool
+    }
+
+    if @options.strict
+      function_def.strict = true
+
     {
       type: "function"
-      function: {
-        name: tool.name
-        description: tool.description
-        parameters: @normalized_schema tool
-        strict: true
-      }
+      function: function_def
     }
 
   -- Normalize tool calls from an OpenAI assistant message
