@@ -12,6 +12,18 @@ local fix_t
 fix_t = function(t, b)
   return t + b * t
 end
+local trim_json_nulls
+trim_json_nulls = function(value)
+  if value == json.null then
+    return nil
+  end
+  if type(value) == "table" then
+    for k, v in pairs(value) do
+      value[k] = trim_json_nulls(v)
+    end
+  end
+  return value
+end
 local StdioTransport
 do
   local _class_0
@@ -328,6 +340,7 @@ do
       if not (tool) then
         return nil, "Unknown tool: " .. tostring(tool_name)
       end
+      arguments = trim_json_nulls(arguments)
       if tool.inputShape then
         local err
         arguments, err = tool.inputShape:transform(arguments)

@@ -205,6 +205,10 @@ describe "ToolAdapter", ->
         result = server\execute_tool "greet", {name: "Bob"}
         assert.equal "Hello, Bob!", result
 
+      it "should treat JSON null optional parameters as omitted", ->
+        result = server\execute_tool "greet", {name: "Bob", greeting: json.null}
+        assert.equal "Hello, Bob!", result
+
       it "should return string values correctly", ->
         result = server\execute_tool "greet", {name: "Charlie"}
         assert.is_string result
@@ -232,6 +236,11 @@ describe "ToolAdapter", ->
 
       it "should return error when missing required parameter", ->
         result, err = server\execute_tool "add-numbers", {a: 5}
+        assert.is_nil result
+        assert.equal "Missing required parameter: b", err
+
+      it "should return error when required parameter is JSON null", ->
+        result, err = server\execute_tool "add-numbers", {a: 5, b: json.null}
         assert.is_nil result
         assert.equal "Missing required parameter: b", err
 
@@ -373,9 +382,12 @@ describe "OpenAIToolAdapter", ->
           function: {
             name: "simple-tool"
             description: "A tool with no parameters"
+            strict: true
             parameters: {
               type: "object"
               properties: {}
+              required: setmetatable {}, json.array_mt
+              additionalProperties: false
             }
           }
         }
@@ -417,6 +429,7 @@ describe "OpenAIToolAdapter", ->
           function: {
             name: "required-params-tool"
             description: "A tool with required parameters"
+            strict: true
             parameters: {
               type: "object"
               properties: {
@@ -429,7 +442,8 @@ describe "OpenAIToolAdapter", ->
                   description: "User age"
                 }
               }
-              required: {"name", "age"}
+              required: {"age", "name"}
+              additionalProperties: false
             }
           }
         }
@@ -463,7 +477,7 @@ describe "OpenAIToolAdapter", ->
       server = TestServer!
       tool_interface = OpenAIToolAdapter(server)
 
-    it "should include only required fields in required array", ->
+    it "should require all fields and mark optional fields nullable", ->
       openai_tools = tool_interface\to_tools!
 
       expected = {
@@ -472,6 +486,7 @@ describe "OpenAIToolAdapter", ->
           function: {
             name: "mixed-params-tool"
             description: "A tool with mixed parameters"
+            strict: true
             parameters: {
               type: "object"
               properties: {
@@ -480,12 +495,12 @@ describe "OpenAIToolAdapter", ->
                   description: "Required field"
                 }
                 optional_field: {
-                  type: "string"
+                  type: {"string", "null"}
                   description: "Optional field"
-                  default: "default-value"
                 }
               }
-              required: {"required_field"}
+              required: {"optional_field", "required_field"}
+              additionalProperties: false
             }
           }
         }
@@ -531,6 +546,7 @@ describe "OpenAIToolAdapter", ->
           function: {
             name: "typed-params-tool"
             description: "A tool with various parameter types"
+            strict: true
             parameters: {
               type: "object"
               properties: {
@@ -539,15 +555,16 @@ describe "OpenAIToolAdapter", ->
                   description: "A string parameter"
                 }
                 num_param: {
-                  type: "number"
+                  type: {"number", "null"}
                   description: "A number parameter"
                 }
                 bool_param: {
-                  type: "boolean"
+                  type: {"boolean", "null"}
                   description: "A boolean parameter"
                 }
               }
-              required: {"str_param"}
+              required: {"bool_param", "num_param", "str_param"}
+              additionalProperties: false
             }
           }
         }
@@ -1252,6 +1269,7 @@ describe "complex realistic scenarios", ->
         function: {
           name: "db-query"
           description: "Execute a database query"
+          strict: true
           parameters: {
             type: "object"
             properties: {
@@ -1262,19 +1280,21 @@ describe "complex realistic scenarios", ->
               where: {
                 type: "object"
                 description: "WHERE conditions"
+                properties: {}
+                required: setmetatable {}, json.array_mt
+                additionalProperties: false
               }
               limit: {
-                type: "number"
+                type: {"number", "null"}
                 description: "Result limit"
-                default: 10
               }
               offset: {
-                type: "number"
+                type: {"number", "null"}
                 description: "Result offset"
-                default: 0
               }
             }
-            required: {"table", "where"}
+            required: {"limit", "offset", "table", "where"}
+            additionalProperties: false
           }
         }
       }

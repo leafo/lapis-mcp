@@ -11,6 +11,15 @@ import subclass_of from require "tableshape.moonscript"
 
 fix_t = (t, b) -> t + b * t
 
+trim_json_nulls = (value) ->
+  return nil if value == json.null
+
+  if type(value) == "table"
+    for k, v in pairs value
+      value[k] = trim_json_nulls v
+
+  value
+
 class StdioTransport
   -- IO and message handling
   read_json_chunk: =>
@@ -398,6 +407,8 @@ class McpServer
     tool = @find_tool tool_name
     unless tool
       return nil, "Unknown tool: #{tool_name}"
+
+    arguments = trim_json_nulls arguments
 
     if tool.inputShape
       -- tableshape input validation and transformation
