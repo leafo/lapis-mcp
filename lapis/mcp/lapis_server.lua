@@ -43,8 +43,8 @@ end
 local LapisMcpServer
 do
   local _class_0
-  local ok, pg_schema
   local _parent_0 = McpServer
+  local ok, pg_schema
   local _base_0 = {
     apply_cookies = function(self, response_headers)
       local extract_cookies

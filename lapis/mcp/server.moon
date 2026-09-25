@@ -205,6 +205,7 @@ class McpServer
       prefix: types.string\is_optional!
       add_tags: types.array_of(types.string)\is_optional!
       filter_tags: types.array_of(types.string)\is_optional!
+      exclude: types.array_of(types.string)\is_optional!
     })\is_optional!
   }, (other_server_class, opts={}) =>
     prefix = opts.prefix or ""
@@ -212,7 +213,18 @@ class McpServer
     target_name = @server_name or @__name or "McpServer"
     source_name = other_server_class.server_name or other_server_class.__name or "McpServer"
 
-    for original_name, tool in pairs collect_all_tools other_server_class
+    source_tools = collect_all_tools other_server_class
+
+    excluded = if opts.exclude
+      {name, true for name in *opts.exclude}
+
+    if excluded
+      for name in pairs excluded
+        unless source_tools[name]
+          error "include exclude on #{target_name}: source #{source_name} has no tool named #{name}"
+
+    for original_name, tool in pairs source_tools
+      continue if excluded and excluded[original_name]
       final_name = prefix .. original_name
 
       if opts.filter_tags

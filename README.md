@@ -334,6 +334,7 @@ Notes about composition:
 - Included tools are registered onto the receiving class, so they work with `find_tool`, `execute_tool`, adapters, and `tools/list` the same way as locally defined tools.
 - Handlers run with the receiving server instance as `self`, so included tools can call methods like `@get_server_name!` on the composed server.
 - Included classes contribute inherited tools too, not just tools defined directly on that class.
+- `exclude` takes a list of source tool names (before `prefix` is applied) to skip, eg. `@include SharedFileTools, exclude: {"read"}`. Naming a tool the source doesn't have raises an error.
 - `@include` raises an error if the final tool name already exists on the receiving server or from another include. Use `prefix` to avoid collisions.
 
 Visibility management uses the final included tool name, so call

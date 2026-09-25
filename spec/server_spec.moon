@@ -535,6 +535,39 @@ describe "McpServer", ->
       assert.is_not_nil server\find_tool "tagged-tool"
       assert.is_not_nil server\find_tool "untagged-tool"
 
+    it "should skip tools named in exclude", ->
+      class SharedServer extends McpServer
+        @add_tool {
+          name: "kept-tool"
+          description: "Kept tool"
+          inputSchema: { type: "object", properties: {}, required: {} }
+        }, -> "kept result"
+
+        @add_tool {
+          name: "excluded-tool"
+          description: "Excluded tool"
+          inputSchema: { type: "object", properties: {}, required: {} }
+        }, -> "excluded result"
+
+      class CombinedServer extends McpServer
+        @include SharedServer, prefix: "shared_", exclude: {"excluded-tool"}
+
+      server = CombinedServer!
+      assert.is_not_nil server\find_tool "shared_kept-tool"
+      assert.is_nil server\find_tool "shared_excluded-tool"
+
+    it "should error when exclude names a missing tool", ->
+      class SharedServer extends McpServer
+        @add_tool {
+          name: "real-tool"
+          description: "Real tool"
+          inputSchema: { type: "object", properties: {}, required: {} }
+        }, -> "real result"
+
+      assert.has_error ->
+        class CombinedServer extends McpServer
+          @include SharedServer, exclude: {"missing-tool"}
+
     it "should append tags to included tools with add_tags", ->
       class SharedServer extends McpServer
         @add_tool {
