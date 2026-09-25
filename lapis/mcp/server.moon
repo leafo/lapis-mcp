@@ -191,6 +191,7 @@ class McpServer
       handler: call_fn
       hidden: details.hidden or false
       tags: details.tags
+      group: details.group
     }
 
     table.insert(rawget(@, "tools"), tool_def)
@@ -206,6 +207,7 @@ class McpServer
       add_tags: types.array_of(types.string)\is_optional!
       filter_tags: types.array_of(types.string)\is_optional!
       exclude: types.array_of(types.string)\is_optional!
+      group: types.string\is_optional!
     })\is_optional!
   }, (other_server_class, opts={}) =>
     prefix = opts.prefix or ""
@@ -252,6 +254,7 @@ class McpServer
         outputShape: tool.outputShape
         annotations: clone_table tool.annotations
         hidden: tool.hidden
+        group: opts.group or tool.group
         tags: if opts.add_tags
           combined = {t, true for t in *(tool.tags or {})}
           for t in *opts.add_tags

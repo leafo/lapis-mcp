@@ -946,7 +946,8 @@ do
       annotations = details.annotations,
       handler = call_fn,
       hidden = details.hidden or false,
-      tags = details.tags
+      tags = details.tags,
+      group = details.group
     }
     return table.insert(rawget(self, "tools"), tool_def)
   end
@@ -958,7 +959,8 @@ do
       prefix = types.string:is_optional(),
       add_tags = types.array_of(types.string):is_optional(),
       filter_tags = types.array_of(types.string):is_optional(),
-      exclude = types.array_of(types.string):is_optional()
+      exclude = types.array_of(types.string):is_optional(),
+      group = types.string:is_optional()
     }):is_optional()
   }, function(self, other_server_class, opts)
     if opts == nil then
@@ -1040,6 +1042,7 @@ do
           outputShape = tool.outputShape,
           annotations = clone_table(tool.annotations),
           hidden = tool.hidden,
+          group = opts.group or tool.group,
           tags = (function()
             if opts.add_tags then
               local combined

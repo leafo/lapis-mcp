@@ -568,6 +568,36 @@ describe "McpServer", ->
         class CombinedServer extends McpServer
           @include SharedServer, exclude: {"missing-tool"}
 
+    it "should set group on included tools", ->
+      class InnerServer extends McpServer
+        @add_tool {
+          name: "inner-tool"
+          description: "Inner tool"
+          group: "inner"
+          inputSchema: { type: "object", properties: {}, required: {} }
+        }, -> "inner result"
+
+      class SharedServer extends InnerServer
+        @add_tool {
+          name: "shared-tool"
+          description: "Shared tool"
+          inputSchema: { type: "object", properties: {}, required: {} }
+        }, -> "shared result"
+
+      class GroupedServer extends McpServer
+        @include SharedServer, group: "shared"
+
+      class UngroupedServer extends McpServer
+        @include SharedServer
+
+      grouped = GroupedServer!
+      assert.same "shared", grouped\find_tool("shared-tool").group
+      assert.same "shared", grouped\find_tool("inner-tool").group
+
+      ungrouped = UngroupedServer!
+      assert.is_nil ungrouped\find_tool("shared-tool").group
+      assert.same "inner", ungrouped\find_tool("inner-tool").group
+
     it "should append tags to included tools with add_tags", ->
       class SharedServer extends McpServer
         @add_tool {
