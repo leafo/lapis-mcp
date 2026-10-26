@@ -105,18 +105,26 @@ do
   _base_0.__class = _class_0
   StdioTransportWithDebugLog = _class_0
 end
+local get_params
+get_params = function(message)
+  return type(message.params) == "table" and message.params or { }
+end
+local error_response
+error_response = function(id, code, error_message)
+  return {
+    jsonrpc = "2.0",
+    id = id,
+    error = {
+      code = code,
+      message = error_message
+    }
+  }
+end
 local with_initialized
 with_initialized = function(fn)
   return function(self, message)
     if not (self.initialized) then
-      return {
-        jsonrpc = "2.0",
-        id = message.id,
-        error = {
-          code = -32002,
-          message = "Server not initialized. Call initialize first."
-        }
-      }
+      return error_response(message.id, -32002, "Server not initialized. Call initialize first.")
     end
     return fn(self, message)
   end
@@ -340,6 +348,12 @@ do
       if not (tool) then
         return nil, "Unknown tool: " .. tostring(tool_name)
       end
+      return self:invoke_tool(tool, arguments)
+    end,
+    invoke_tool = function(self, tool, arguments)
+      if arguments == nil then
+        arguments = { }
+      end
       arguments = trim_json_nulls(arguments)
       if tool.inputShape then
         local err
@@ -394,44 +408,51 @@ do
       return self.transport:write_json_chunk(obj)
     end,
     handle_message = function(self, message)
+      if not (type(message) == "table") then
+        return error_response(json.null, -32600, "Invalid Request")
+      end
       self:debug_log("info", "Received message: " .. tostring(message.method))
+      if not (type(message.method) == "string") then
+        if message.result ~= nil or message.error ~= nil then
+          return nil
+        end
+        return error_response(message.id or json.null, -32600, "Invalid Request")
+      end
+      local response
       local _exp_0 = message.method
       if "initialize" == _exp_0 then
-        return self:handle_initialize(message)
+        response = self:handle_initialize(message)
       elseif "notifications/initialized" == _exp_0 then
         self:debug_log("info", "Client notified initialized")
         self.client_initialized = true
       elseif "notifications/cancelled" == _exp_0 then
-        return self:handle_notifications_canceled(message)
+        response = self:handle_notifications_canceled(message)
       elseif "tools/list" == _exp_0 then
         self:debug_log("info", "Listing available tools")
-        return self:handle_tools_list(message)
+        response = self:handle_tools_list(message)
       elseif "tools/call" == _exp_0 then
-        return self:handle_tools_call(message)
+        response = self:handle_tools_call(message)
       elseif "resources/list" == _exp_0 then
         self:debug_log("info", "Listing available resources")
-        return self:handle_resources_list(message)
+        response = self:handle_resources_list(message)
       elseif "resources/templates/list" == _exp_0 then
         self:debug_log("info", "Listing available resource templates")
-        return self:handle_resources_templates_list(message)
+        response = self:handle_resources_templates_list(message)
       elseif "resources/read" == _exp_0 then
-        return self:handle_resources_read(message)
+        response = self:handle_resources_read(message)
       elseif "ping" == _exp_0 then
-        return self:handle_ping(message)
+        response = self:handle_ping(message)
       else
         self:debug_log("warning", "Unknown method: " .. tostring(message.method))
-        return {
-          jsonrpc = "2.0",
-          id = message.id,
-          error = {
-            code = -32601,
-            message = "Method not found: " .. tostring(message.method)
-          }
-        }
+        response = error_response(message.id, -32601, "Method not found: " .. tostring(message.method))
       end
+      if message.id == nil then
+        return nil
+      end
+      return response
     end,
     handle_initialize = function(self, message)
-      local params = message.params or { }
+      local params = get_params(message)
       local client_info = params.clientInfo or { }
       local client_capabilities = params.capabilities or { }
       local requested_version = params.protocolVersion or "2025-06-18"
@@ -479,10 +500,22 @@ do
       }
     end,
     handle_tools_call = with_initialized(function(self, message)
-      local tool_name = message.params.name
+      local params = get_params(message)
+      local tool_name = params.name
+      if not (type(tool_name) == "string") then
+        return error_response(message.id, -32602, "Missing required parameter: name")
+      end
       local tool = self:find_tool(tool_name)
+      if not (tool) then
+        self:debug_log("error", "Unknown tool: " .. tostring(tool_name))
+        return error_response(message.id, -32602, "Unknown tool: " .. tostring(tool_name))
+      end
+      local arguments = params.arguments
+      if not (arguments == nil or type(arguments) == "table") then
+        return error_response(message.id, -32602, "Invalid arguments: expected an object")
+      end
       self:debug_log("info", "Executing tool: " .. tostring(tool_name))
-      local result, err = self:execute_tool(tool_name, message.params.arguments or { })
+      local result, err = self:invoke_tool(tool, arguments or { })
       if err then
         self:debug_log("error", err)
         return {
@@ -504,7 +537,7 @@ do
         content = text_content(result),
         isError = false
       }
-      if tool and tool.outputSchema and type(result) == "table" then
+      if tool.outputSchema and type(result) == "table" then
         response_result.structuredContent = result
       end
       return {
@@ -705,41 +738,19 @@ do
       }
     end),
     handle_resources_read = with_initialized(function(self, message)
-      local resource_uri = message.params.uri
+      local resource_uri = get_params(message).uri
+      if not (type(resource_uri) == "string") then
+        return error_response(message.id, -32602, "Missing required parameter: uri")
+      end
       self:debug_log("info", "Reading resource: " .. tostring(resource_uri))
       local resource, uri_params = self:find_resource(resource_uri)
       if not (resource) then
-        return {
-          jsonrpc = "2.0",
-          id = message.id,
-          error = {
-            code = -32002,
-            message = "Resource not found: " .. tostring(resource_uri)
-          }
-        }
+        return error_response(message.id, -32002, "Resource not found: " .. tostring(resource_uri))
       end
-      local ok, result_or_error, user_error = pcall(resource.handler, self, uri_params, message)
-      if not ok then
-        self:debug_log("error", "Resource read failed: " .. tostring(result_or_error))
-        return {
-          jsonrpc = "2.0",
-          id = message.id,
-          error = {
-            code = -32603,
-            message = "Error reading resource: " .. tostring(result_or_error)
-          }
-        }
-      end
+      local result_or_error, user_error = resource.handler(self, uri_params, message)
       if result_or_error == nil then
         self:debug_log("warning", "Resource returned error: " .. tostring(user_error or "Unknown error"))
-        return {
-          jsonrpc = "2.0",
-          id = message.id,
-          error = {
-            code = -32603,
-            message = "Error reading resource: " .. tostring(user_error or "Unknown error")
-          }
-        }
+        return error_response(message.id, -32603, "Error reading resource: " .. tostring(user_error or "Unknown error"))
       end
       self:debug_log("success", "Resource read successfully: " .. tostring(resource_uri))
       local contents
@@ -778,7 +789,7 @@ do
       }
     end,
     handle_notifications_canceled = function(self, message)
-      local id = message.params.requestId
+      local id = get_params(message).requestId
       return nil
     end,
     send_message = function(self, message)
@@ -848,15 +859,8 @@ do
             end)
             if ok then
               response = result
-            else
-              response = {
-                jsonrpc = "2.0",
-                id = message.id,
-                error = {
-                  code = -32603,
-                  message = "Internal error"
-                }
-              }
+            elseif message.id ~= nil then
+              response = error_response(message.id, -32603, "Internal error")
             end
           else
             response = self:handle_message(message)
@@ -934,12 +938,14 @@ do
     if details.outputShape then
       output_schema = schema_from_shape(details.outputShape, "outputShape")
     end
+    input_schema = input_schema or details.inputSchema
+    assert(input_schema, "add_tool " .. tostring(details.name) .. ": inputSchema or inputShape is required")
     local tool_def = {
       name = details.name,
       description = details.description,
       title = details.title,
       icons = details.icons,
-      inputSchema = input_schema or details.inputSchema,
+      inputSchema = input_schema,
       inputShape = details.inputShape,
       outputSchema = output_schema or details.outputSchema,
       outputShape = details.outputShape,

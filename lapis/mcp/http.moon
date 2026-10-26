@@ -171,7 +171,7 @@ mcp_handler = (ServerClass, opts={}) ->
           json: response
           headers: @cors_headers
         }
-        if message.method == "initialize" and opts.create_session_id
+        if type(message) == "table" and message.method == "initialize" and opts.create_session_id
           session_id = opts.create_session_id @, @mcp_server
           if session_id
             out.headers = merge_headers out.headers, {"Mcp-Session-Id": session_id}

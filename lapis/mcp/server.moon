@@ -67,17 +67,24 @@ class StdioTransportWithDebugLog
     io.write data .. "\n"
     io.flush!
 
+-- params may be missing or json.null on a malformed request
+get_params = (message) ->
+  type(message.params) == "table" and message.params or {}
+
+error_response = (id, code, error_message) ->
+  {
+    jsonrpc: "2.0"
+    id: id
+    error: {
+      code: code
+      message: error_message
+    }
+  }
+
 with_initialized = (fn) ->
   (message) =>
     unless @initialized
-      return {
-        jsonrpc: "2.0"
-        id: message.id
-        error: {
-          code: -32002
-          message: "Server not initialized. Call initialize first."
-        }
-      }
+      return error_response message.id, -32002, "Server not initialized. Call initialize first."
 
     fn @, message
 
@@ -178,12 +185,16 @@ class McpServer
     output_schema = if details.outputShape
       schema_from_shape details.outputShape, "outputShape"
 
+    -- tools without parameters should still declare an empty object schema
+    input_schema or= details.inputSchema
+    assert input_schema, "add_tool #{details.name}: inputSchema or inputShape is required"
+
     tool_def = {
       name: details.name
       description: details.description
       title: details.title
       icons: details.icons
-      inputSchema: input_schema or details.inputSchema
+      inputSchema: input_schema
       inputShape: details.inputShape
       outputSchema: output_schema or details.outputSchema
       outputShape: details.outputShape
@@ -423,6 +434,10 @@ class McpServer
     unless tool
       return nil, "Unknown tool: #{tool_name}"
 
+    @invoke_tool tool, arguments
+
+  -- Run an already resolved tool definition, see execute_tool
+  invoke_tool: (tool, arguments={}) =>
     arguments = trim_json_nulls arguments
 
     if tool.inputShape
@@ -471,9 +486,17 @@ class McpServer
 
   -- Message handler
   handle_message: (message) =>
+    unless type(message) == "table"
+      return error_response json.null, -32600, "Invalid Request"
+
     @debug_log "info", "Received message: #{message.method}"
 
-    switch message.method
+    unless type(message.method) == "string"
+      -- a response from the client, nothing to reply with
+      return nil if message.result != nil or message.error != nil
+      return error_response message.id or json.null, -32600, "Invalid Request"
+
+    response = switch message.method
       when "initialize"
         @handle_initialize message
       when "notifications/initialized"
@@ -498,18 +521,15 @@ class McpServer
         @handle_ping message
       else
         @debug_log "warning", "Unknown method: #{message.method}"
-        {
-          jsonrpc: "2.0"
-          id: message.id
-          error: {
-            code: -32601
-            message: "Method not found: #{message.method}"
-          }
-        }
+        error_response message.id, -32601, "Method not found: #{message.method}"
+
+    -- notifications must never receive a reply
+    return nil if message.id == nil
+    response
 
   -- Handle initialization message
   handle_initialize: (message) =>
-    params = message.params or {}
+    params = get_params message
 
     -- Extract client info
     client_info = params.clientInfo or {}
@@ -558,12 +578,25 @@ class McpServer
     }
 
   handle_tools_call: with_initialized (message) =>
-    tool_name = message.params.name
+    params = get_params message
+    tool_name = params.name
+
+    unless type(tool_name) == "string"
+      return error_response message.id, -32602, "Missing required parameter: name"
+
     tool = @find_tool tool_name
+
+    unless tool
+      @debug_log "error", "Unknown tool: #{tool_name}"
+      return error_response message.id, -32602, "Unknown tool: #{tool_name}"
+
+    arguments = params.arguments
+    unless arguments == nil or type(arguments) == "table"
+      return error_response message.id, -32602, "Invalid arguments: expected an object"
 
     @debug_log "info", "Executing tool: #{tool_name}"
 
-    result, err = @execute_tool tool_name, message.params.arguments or {}
+    result, err = @invoke_tool tool, arguments or {}
 
     if err
       @debug_log "error", err
@@ -588,7 +621,7 @@ class McpServer
       isError: false
     }
 
-    if tool and tool.outputSchema and type(result) == "table"
+    if tool.outputSchema and type(result) == "table"
       response_result.structuredContent = result
 
     return {
@@ -719,47 +752,26 @@ class McpServer
 
   -- Handle resources/read request
   handle_resources_read: with_initialized (message) =>
-    resource_uri = message.params.uri
+    resource_uri = get_params(message).uri
+
+    unless type(resource_uri) == "string"
+      return error_response message.id, -32602, "Missing required parameter: uri"
 
     @debug_log "info", "Reading resource: #{resource_uri}"
 
     resource, uri_params = @find_resource resource_uri
 
     unless resource
-      return {
-        jsonrpc: "2.0"
-        id: message.id
-        error: {
-          code: -32002
-          message: "Resource not found: #{resource_uri}"
-        }
-      }
+      return error_response message.id, -32002, "Resource not found: #{resource_uri}"
 
-    -- Call the resource handler
-    ok, result_or_error, user_error = pcall(resource.handler, @, uri_params, message)
-
-    if not ok
-      @debug_log "error", "Resource read failed: #{result_or_error}"
-      return {
-        jsonrpc: "2.0"
-        id: message.id
-        error: {
-          code: -32603
-          message: "Error reading resource: #{result_or_error}"
-        }
-      }
+    -- errors raised by the handler are bugs in the server and propagate,
+    -- only an explicit nil, err return is reported to the client
+    result_or_error, user_error = resource.handler @, uri_params, message
 
     -- wrap nil, err into error response
     if result_or_error == nil
       @debug_log "warning", "Resource returned error: #{user_error or "Unknown error"}"
-      return {
-        jsonrpc: "2.0"
-        id: message.id
-        error: {
-          code: -32603
-          message: "Error reading resource: #{user_error or "Unknown error"}"
-        }
-      }
+      return error_response message.id, -32603, "Error reading resource: #{user_error or "Unknown error"}"
 
     @debug_log "success", "Resource read successfully: #{resource_uri}"
 
@@ -799,7 +811,7 @@ class McpServer
   --- called to cancel a running job
   -- {"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":1,"reason":"McpError: MCP error -32001: Request timed out"}}
   handle_notifications_canceled: (message) =>
-    id = message.params.requestId
+    id = get_params(message).requestId
     -- we ignore this now, there's nothing we can do without async tasks
     nil
 
@@ -857,12 +869,9 @@ class McpServer
 
         if ok
           result
-        else
-          {
-            jsonrpc: "2.0"
-            id: message.id
-            error: { code: -32603, message: "Internal error" }
-          }
+        elseif message.id != nil
+          -- the traceback above is the real report, notifications get no reply
+          error_response message.id, -32603, "Internal error"
       else
         @handle_message message
 

@@ -845,6 +845,70 @@ describe "McpServer", ->
         }
       }, response
 
+    it "should not reply to unknown notifications", ->
+      assert.is_nil server\handle_message {
+        jsonrpc: "2.0"
+        method: "notifications/roots/list_changed"
+      }
+
+    it "should not reply to known methods sent as notifications", ->
+      assert.is_nil server\handle_message {
+        jsonrpc: "2.0"
+        method: "ping"
+      }
+
+    it "should not reply to responses from the client", ->
+      assert.is_nil server\handle_message {
+        jsonrpc: "2.0"
+        id: 5
+        result: {}
+      }
+
+      assert.is_nil server\handle_message {
+        jsonrpc: "2.0"
+        id: 6
+        error: { code: -32601, message: "Method not found" }
+      }
+
+    it "should return invalid request for messages without a method", ->
+      assert.same {
+        jsonrpc: "2.0"
+        id: 7
+        error: { code: -32600, message: "Invalid Request" }
+      }, server\handle_message { jsonrpc: "2.0", id: 7 }
+
+    it "should return invalid request for a non-string method", ->
+      for bad_method in *{json.null, 42}
+        assert.same {
+          jsonrpc: "2.0"
+          id: 8
+          error: { code: -32600, message: "Invalid Request" }
+        }, server\handle_message { jsonrpc: "2.0", id: 8, method: bad_method }
+
+    it "should handle initialize with null params", ->
+      response = server\handle_message {
+        jsonrpc: "2.0"
+        id: 9
+        method: "initialize"
+        params: json.null
+      }
+
+      assert.equal 9, response.id
+      assert.equal "2025-11-25", response.result.protocolVersion
+
+    it "should return invalid request for non-object messages", ->
+      assert.same {
+        jsonrpc: "2.0"
+        id: json.null
+        error: { code: -32600, message: "Invalid Request" }
+      }, server\handle_message 5
+
+    it "should handle notifications/cancelled without params", ->
+      assert.is_nil server\handle_message {
+        jsonrpc: "2.0"
+        method: "notifications/cancelled"
+      }
+
   describe "handle_tools_list", ->
     local server, mock_transport
     before_each ->
@@ -1020,16 +1084,57 @@ describe "McpServer", ->
       assert.same {
         jsonrpc: "2.0",
         id: 3,
-        result: {
-          content: {
-            {
-              type: "text",
-              text: "Unknown tool: unknown_tool"
-            }
-          },
-          isError: true
+        error: {
+          code: -32602,
+          message: "Unknown tool: unknown_tool"
         }
       }, response
+
+    it "should return invalid params when params are missing", ->
+      response = server\handle_message {
+        jsonrpc: "2.0"
+        id: 3
+        method: "tools/call"
+      }
+
+      assert.same {
+        jsonrpc: "2.0",
+        id: 3,
+        error: {
+          code: -32602,
+          message: "Missing required parameter: name"
+        }
+      }, response
+
+    it "should return invalid params when arguments is not an object", ->
+      for bad_arguments in *{json.null, 5, "param1"}
+        response = server\handle_message {
+          jsonrpc: "2.0"
+          id: 3
+          method: "tools/call"
+          params: {
+            name: "required-params-tool"
+            arguments: bad_arguments
+          }
+        }
+
+        assert.same {
+          jsonrpc: "2.0",
+          id: 3,
+          error: {
+            code: -32602,
+            message: "Invalid arguments: expected an object"
+          }
+        }, response
+
+    it "should require inputSchema or inputShape when adding a tool", ->
+      assert.has_error (->
+        class NoSchemaServer extends McpServer
+          @add_tool {
+            name: "no-schema"
+            description: "Has no input schema"
+          }, -> "ok"
+      ), "add_tool no-schema: inputSchema or inputShape is required"
 
     it "should handle returning a simple string", ->
       message = {
@@ -1958,6 +2063,24 @@ describe "McpServer", ->
         decoded = json.decode(content.text)
         assert.same {message: "Hello", value: 42}, decoded
 
+      it "should return invalid params when uri is missing", ->
+        server\skip_initialize!
+
+        response = server\handle_message {
+          jsonrpc: "2.0"
+          id: 1
+          method: "resources/read"
+        }
+
+        assert.same {
+          jsonrpc: "2.0"
+          id: 1
+          error: {
+            code: -32602
+            message: "Missing required parameter: uri"
+          }
+        }, response
+
       it "should handle resource not found", ->
         server\skip_initialize!
 
@@ -1999,6 +2122,26 @@ describe "McpServer", ->
             message: "Error reading resource: Resource error"
           }
         }, response
+
+      it "should propagate errors raised by the resource handler", ->
+        class CrashingResourceServer extends McpServer
+          @add_resource {
+            uri: "test://example/crash"
+            name: "Crashing Resource"
+          }, -> error "handler bug"
+
+        crashing_server = CrashingResourceServer!
+        crashing_server\skip_initialize!
+
+        assert.has_error ->
+          crashing_server\handle_resources_read {
+            jsonrpc: "2.0"
+            id: 1
+            method: "resources/read"
+            params: {
+              uri: "test://example/crash"
+            }
+          }
 
       it "should handle structured response", ->
         server\skip_initialize!

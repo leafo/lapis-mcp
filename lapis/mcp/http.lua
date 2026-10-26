@@ -235,7 +235,7 @@ mcp_handler = function(ServerClass, opts)
           json = response,
           headers = self.cors_headers
         }
-        if message.method == "initialize" and opts.create_session_id then
+        if type(message) == "table" and message.method == "initialize" and opts.create_session_id then
           local session_id = opts.create_session_id(self, self.mcp_server)
           if session_id then
             out.headers = merge_headers(out.headers, {
