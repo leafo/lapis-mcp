@@ -4,6 +4,10 @@
 -- step. Auth codes are stateless: HMAC-signed JSON using the configured
 -- client_secret. The issued access_token is the configured access_token (or
 -- the client_secret if no access_token is provided).
+--
+-- Because codes are not stored, a code can be redeemed more than once until
+-- it expires. Every redemption still requires the client secret and the PKCE
+-- verifier, and always yields the same static token.
 
 json = require "cjson.safe"
 
@@ -15,18 +19,62 @@ base64url_no_pad = (s) ->
   encoded = encode_base64 s
   (encoded\gsub("+", "-")\gsub("/", "_")\gsub("=", ""))
 
-verify_pkce = (verifier, challenge, method="plain") ->
-  return false unless verifier and challenge
-  switch method
-    when "plain"
-      verifier == challenge
-    when "S256"
-      digest = require "openssl.digest"
-      h = digest.new "sha256"
-      h\update verifier
-      base64url_no_pad(h\final!) == challenge
-    else
-      false
+-- compares without exiting early, so timing doesn't reveal how much of a
+-- secret matched
+secure_compare = (a, b) ->
+  return false unless type(a) == "string" and type(b) == "string"
+  return false unless #a == #b
+
+  diff = 0
+  for i=1,#a
+    diff += 1 unless a\byte(i) == b\byte(i)
+
+  diff == 0
+
+-- matches an Authorization header against an expected bearer token, the
+-- scheme is case insensitive (RFC 7235)
+verify_bearer = (header, expected) ->
+  return false unless type(header) == "string" and expected
+  scheme, token = header\match "^(%S+)%s+(.+)$"
+  return false unless scheme and scheme\lower! == "bearer"
+  secure_compare token, expected
+
+-- only S256 is supported, as required by OAuth 2.1 and the MCP spec
+verify_pkce = (verifier, challenge) ->
+  return false unless type(verifier) == "string" and type(challenge) == "string"
+  digest = require "openssl.digest"
+  h = digest.new "sha256"
+  h\update verifier
+  secure_compare base64url_no_pad(h\final!), challenge
+
+-- loopback redirect URIs may use any port (RFC 8252 section 7.3)
+LOOPBACK_HOSTS = {
+  "localhost": true
+  "127.0.0.1": true
+  "[::1]": true
+}
+
+parse_redirect_uri = (uri) ->
+  scheme, host, port, rest = uri\match "^(%a[%w+.-]*)://([^/:?#]+):?(%d*)(.*)$"
+  unless scheme
+    -- IPv6 literal host
+    scheme, host, port, rest = uri\match "^(%a[%w+.-]*)://(%[[^%]]+%]):?(%d*)(.*)$"
+
+  return nil unless scheme
+  scheme\lower!, host\lower!, port, rest
+
+redirect_uri_allowed = (uri, allowed_uris) ->
+  return false unless type(uri) == "string"
+
+  for allowed in *allowed_uris
+    return true if uri == allowed
+
+    scheme, host, port, rest = parse_redirect_uri uri
+    a_scheme, a_host, a_port, a_rest = parse_redirect_uri allowed
+    if scheme and a_scheme and scheme == "http" and LOOPBACK_HOSTS[host]
+      return true if scheme == a_scheme and host == a_host and rest == a_rest
+
+  false
 
 decode_basic_part = (part) ->
   unescape part\gsub "%+", " "
@@ -62,10 +110,7 @@ class OauthConfig
     "#{base}#{segment}"
 
   verify_bearer_token: (header) =>
-    return false unless header
-    token = header\match "^[Bb]earer (.+)$"
-    return false unless token
-    token == (@opts.access_token or @opts.client_secret)
+    verify_bearer header, @opts.access_token or @opts.client_secret
 
   protected_resource_handler: =>
     config = @
@@ -94,8 +139,9 @@ class OauthConfig
           token_endpoint: "#{issuer}/oauth/token"
           response_types_supported: setmetatable {"code"}, json.array_mt
           grant_types_supported: setmetatable {"authorization_code", "client_credentials"}, json.array_mt
-          code_challenge_methods_supported: setmetatable {"S256", "plain"}, json.array_mt
+          code_challenge_methods_supported: setmetatable {"S256"}, json.array_mt
           token_endpoint_auth_methods_supported: setmetatable {"client_secret_post", "client_secret_basic"}, json.array_mt
+          authorization_response_iss_parameter_supported: true
         }
         headers: {
           ["Cache-Control"]: "public, max-age=3600"
@@ -113,6 +159,7 @@ class OauthConfig
         redirect_uri = params.redirect_uri
         state = params.state
         code_challenge = params.code_challenge
+        -- RFC 7636 defaults a missing method to plain, which is not supported
         code_challenge_method = params.code_challenge_method or "plain"
 
         unless response_type == "code"
@@ -124,15 +171,25 @@ class OauthConfig
         unless redirect_uri
           return status: 400, json: {error: "invalid_request", error_description: "missing redirect_uri"}
 
+        if config.opts.allowed_redirect_uris
+          unless redirect_uri_allowed redirect_uri, config.opts.allowed_redirect_uris
+            return status: 400, json: {error: "invalid_request", error_description: "redirect_uri not allowed"}
+
+        unless code_challenge and code_challenge != ""
+          return status: 400, json: {error: "invalid_request", error_description: "PKCE code_challenge is required"}
+
+        unless code_challenge_method == "S256"
+          return status: 400, json: {error: "invalid_request", error_description: "code_challenge_method must be S256"}
+
         code = encode_with_secret {
           cid: client_id
           ru: redirect_uri
           cc: code_challenge
-          ccm: code_challenge_method
           exp: os.time! + 600
         }, config.opts.client_secret
 
-        qs_params = {code: code}
+        -- RFC 9207 issuer identification, lets the client detect mix-up attacks
+        qs_params = {code: code, iss: config\issuer_url route.req}
         qs_params.state = state if state
 
         sep = redirect_uri\find("?", 1, true) and "&" or "?"
@@ -199,7 +256,7 @@ class OauthConfig
               client_id = decode_basic_part cid if cid
               client_secret = decode_basic_part csec if csec
 
-        unless client_id == config.opts.client_id and client_secret == config.opts.client_secret
+        unless client_id == config.opts.client_id and secure_compare client_secret, config.opts.client_secret
           return error_response 401, "invalid_client"
 
         switch args.grant_type
@@ -213,9 +270,8 @@ class OauthConfig
               return error_response 400, "invalid_grant", "client_id mismatch"
             unless code_data.ru == args.redirect_uri
               return error_response 400, "invalid_grant", "redirect_uri mismatch"
-            if code_data.cc
-              unless verify_pkce args.code_verifier, code_data.cc, code_data.ccm
-                return error_response 400, "invalid_grant", "PKCE verification failed"
+            unless verify_pkce args.code_verifier, code_data.cc
+              return error_response 400, "invalid_grant", "PKCE verification failed"
             issue_token!
           when "client_credentials"
             issue_token!
@@ -248,4 +304,6 @@ class OauthConfig
 
 {
   :OauthConfig
+  :verify_bearer
+  :redirect_uri_allowed
 }

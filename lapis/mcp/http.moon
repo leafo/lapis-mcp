@@ -1,6 +1,7 @@
 json = require "cjson.safe"
 
 import respond_to from require "lapis.application"
+import verify_bearer from require "lapis.mcp.oauth"
 
 -- There is no stream to deliver server initiated notifications over HTTP, so
 -- don't advertise any capability that depends on them
@@ -74,13 +75,6 @@ server_class_for = (server_module) ->
     server_module
 
 
-verify_static_bearer = (header, expected) ->
-  return false unless header and expected
-  scheme, token = header\match "^(%S+)%s+(.+)$"
-  return false unless scheme and scheme\lower! == "bearer"
-  return false unless token
-  token == expected
-
 mcp_handler = (ServerClass, opts={}) ->
   oauth = opts.oauth
   bearer_token = opts.bearer_token
@@ -121,7 +115,7 @@ mcp_handler = (ServerClass, opts={}) ->
             }
             return
         elseif bearer_token
-          unless verify_static_bearer @req.headers["authorization"], bearer_token
+          unless verify_bearer @req.headers["authorization"], bearer_token
             @write {
               json: {error: "unauthorized"}
               status: 401

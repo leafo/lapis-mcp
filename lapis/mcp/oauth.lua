@@ -16,25 +16,78 @@ base64url_no_pad = function(s)
   local encoded = encode_base64(s)
   return (encoded:gsub("+", "-"):gsub("/", "_"):gsub("=", ""))
 end
+local secure_compare
+secure_compare = function(a, b)
+  if not (type(a) == "string" and type(b) == "string") then
+    return false
+  end
+  if not (#a == #b) then
+    return false
+  end
+  local diff = 0
+  for i = 1, #a do
+    if not (a:byte(i) == b:byte(i)) then
+      diff = diff + 1
+    end
+  end
+  return diff == 0
+end
+local verify_bearer
+verify_bearer = function(header, expected)
+  if not (type(header) == "string" and expected) then
+    return false
+  end
+  local scheme, token = header:match("^(%S+)%s+(.+)$")
+  if not (scheme and scheme:lower() == "bearer") then
+    return false
+  end
+  return secure_compare(token, expected)
+end
 local verify_pkce
-verify_pkce = function(verifier, challenge, method)
-  if method == nil then
-    method = "plain"
-  end
-  if not (verifier and challenge) then
+verify_pkce = function(verifier, challenge)
+  if not (type(verifier) == "string" and type(challenge) == "string") then
     return false
   end
-  local _exp_0 = method
-  if "plain" == _exp_0 then
-    return verifier == challenge
-  elseif "S256" == _exp_0 then
-    local digest = require("openssl.digest")
-    local h = digest.new("sha256")
-    h:update(verifier)
-    return base64url_no_pad(h:final()) == challenge
-  else
+  local digest = require("openssl.digest")
+  local h = digest.new("sha256")
+  h:update(verifier)
+  return secure_compare(base64url_no_pad(h:final()), challenge)
+end
+local LOOPBACK_HOSTS = {
+  ["localhost"] = true,
+  ["127.0.0.1"] = true,
+  ["[::1]"] = true
+}
+local parse_redirect_uri
+parse_redirect_uri = function(uri)
+  local scheme, host, port, rest = uri:match("^(%a[%w+.-]*)://([^/:?#]+):?(%d*)(.*)$")
+  if not (scheme) then
+    scheme, host, port, rest = uri:match("^(%a[%w+.-]*)://(%[[^%]]+%]):?(%d*)(.*)$")
+  end
+  if not (scheme) then
+    return nil
+  end
+  return scheme:lower(), host:lower(), port, rest
+end
+local redirect_uri_allowed
+redirect_uri_allowed = function(uri, allowed_uris)
+  if not (type(uri) == "string") then
     return false
   end
+  for _index_0 = 1, #allowed_uris do
+    local allowed = allowed_uris[_index_0]
+    if uri == allowed then
+      return true
+    end
+    local scheme, host, port, rest = parse_redirect_uri(uri)
+    local a_scheme, a_host, a_port, a_rest = parse_redirect_uri(allowed)
+    if scheme and a_scheme and scheme == "http" and LOOPBACK_HOSTS[host] then
+      if scheme == a_scheme and host == a_host and rest == a_rest then
+        return true
+      end
+    end
+  end
+  return false
 end
 local decode_basic_part
 decode_basic_part = function(part)
@@ -80,14 +133,7 @@ do
       return tostring(base) .. tostring(segment)
     end,
     verify_bearer_token = function(self, header)
-      if not (header) then
-        return false
-      end
-      local token = header:match("^[Bb]earer (.+)$")
-      if not (token) then
-        return false
-      end
-      return token == (self.opts.access_token or self.opts.client_secret)
+      return verify_bearer(header, self.opts.access_token or self.opts.client_secret)
     end,
     protected_resource_handler = function(self)
       local config = self
@@ -127,13 +173,13 @@ do
               "client_credentials"
             }, json.array_mt),
             code_challenge_methods_supported = setmetatable({
-              "S256",
-              "plain"
+              "S256"
             }, json.array_mt),
             token_endpoint_auth_methods_supported = setmetatable({
               "client_secret_post",
               "client_secret_basic"
-            }, json.array_mt)
+            }, json.array_mt),
+            authorization_response_iss_parameter_supported = true
           },
           headers = {
             ["Cache-Control"] = "public, max-age=3600",
@@ -178,15 +224,44 @@ do
               }
             }
           end
+          if config.opts.allowed_redirect_uris then
+            if not (redirect_uri_allowed(redirect_uri, config.opts.allowed_redirect_uris)) then
+              return {
+                status = 400,
+                json = {
+                  error = "invalid_request",
+                  error_description = "redirect_uri not allowed"
+                }
+              }
+            end
+          end
+          if not (code_challenge and code_challenge ~= "") then
+            return {
+              status = 400,
+              json = {
+                error = "invalid_request",
+                error_description = "PKCE code_challenge is required"
+              }
+            }
+          end
+          if not (code_challenge_method == "S256") then
+            return {
+              status = 400,
+              json = {
+                error = "invalid_request",
+                error_description = "code_challenge_method must be S256"
+              }
+            }
+          end
           local code = encode_with_secret({
             cid = client_id,
             ru = redirect_uri,
             cc = code_challenge,
-            ccm = code_challenge_method,
             exp = os.time() + 600
           }, config.opts.client_secret)
           local qs_params = {
-            code = code
+            code = code,
+            iss = config:issuer_url(route.req)
           }
           if state then
             qs_params.state = state
@@ -282,7 +357,7 @@ do
               end
             end
           end
-          if not (client_id == config.opts.client_id and client_secret == config.opts.client_secret) then
+          if not (client_id == config.opts.client_id and secure_compare(client_secret, config.opts.client_secret)) then
             return error_response(401, "invalid_client")
           end
           local _exp_0 = args.grant_type
@@ -300,10 +375,8 @@ do
             if not (code_data.ru == args.redirect_uri) then
               return error_response(400, "invalid_grant", "redirect_uri mismatch")
             end
-            if code_data.cc then
-              if not (verify_pkce(args.code_verifier, code_data.cc, code_data.ccm)) then
-                return error_response(400, "invalid_grant", "PKCE verification failed")
-              end
+            if not (verify_pkce(args.code_verifier, code_data.cc)) then
+              return error_response(400, "invalid_grant", "PKCE verification failed")
             end
             return issue_token()
           elseif "client_credentials" == _exp_0 then
@@ -372,5 +445,7 @@ do
   OauthConfig = _class_0
 end
 return {
-  OauthConfig = OauthConfig
+  OauthConfig = OauthConfig,
+  verify_bearer = verify_bearer,
+  redirect_uri_allowed = redirect_uri_allowed
 }

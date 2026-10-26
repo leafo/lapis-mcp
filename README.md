@@ -891,12 +891,19 @@ The MCP endpoint requires `Authorization: Bearer <token>` and returns 401 with
 a `WWW-Authenticate` header pointing at the resource metadata when missing or
 invalid. Clients discover the authorization server, run the
 `authorization_code` flow with PKCE (auto-approved with no UI), and exchange
-the resulting code for an access token at `{mount_path}/oauth/token`. The
-`client_credentials` grant is also supported. The token endpoint accepts
-client credentials either as POST body parameters (`client_secret_post`) or as
-an `Authorization: Basic` header (`client_secret_basic`). Auth codes are
+the resulting code for an access token at `{mount_path}/oauth/token`. PKCE is
+required and only the `S256` method is accepted, as required by OAuth 2.1 and
+the MCP specification. The authorization redirect includes the `iss` parameter
+([RFC 9207](https://datatracker.ietf.org/doc/html/rfc9207)) so clients can
+verify which server issued the code. The `client_credentials` grant is also
+supported and does not use PKCE. The token endpoint accepts client credentials
+either as POST body parameters (`client_secret_post`) or as an
+`Authorization: Basic` header (`client_secret_basic`). Auth codes are
 stateless HMAC-signed payloads using `client_secret`, so no storage is
-required between the `/authorize` and `/token` requests.
+required between the `/authorize` and `/token` requests. Because codes aren't
+stored, a code can be redeemed more than once within its 10 minute lifetime;
+each redemption still needs the client secret and PKCE verifier, and returns
+the same static token.
 
 Direct router usage:
 
@@ -940,6 +947,7 @@ configured `access_token` to Claude, which sends it back as
 - `client_secret` (required): verified at the token endpoint and used as the HMAC key for stateless auth codes.
 - `access_token` (optional): the bearer token returned to the client and accepted on the MCP endpoint. Defaults to `client_secret`.
 - `access_token_ttl` (optional): `expires_in` returned at the token endpoint. Defaults to `3600`.
+- `allowed_redirect_uris` (optional): array of redirect URIs the authorize endpoint may redirect to. When set, any other `redirect_uri` is rejected with `400`. Loopback URIs (`http://localhost`, `http://127.0.0.1`, `http://[::1]`) match on any port, as native clients pick a port at random. When omitted, any `redirect_uri` is accepted.
 - `public_base_url` (optional): public base URL used to derive metadata URLs, issuer, and resource when those values are not explicitly configured. Defaults to the request `Host` (and `X-Forwarded-Proto`/`X-Forwarded-Host`) when omitted.
 - `issuer` (optional): issuer URL exposed in the metadata documents. Defaults to `public_base_url` joined with the MCP mount path.
 - `resource` (optional): resource URL exposed in the protected-resource metadata. Defaults to `public_base_url` joined with the MCP mount path (e.g. `https://host/mcp` when mounted at `/mcp`), matching the default `issuer`.

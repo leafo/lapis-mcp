@@ -20,6 +20,34 @@ build_app = (path="/mcp", opts=oauth_opts) ->
 
   TestApp
 
+VERIFIER = "test-code-verifier-0123456789-abcdefghijklmnopqrstuvwxyz"
+
+s256_challenge = (verifier) ->
+  import encode_base64 from require "lapis.util.encoding"
+  digest = require "openssl.digest"
+  h = digest.new "sha256"
+  h\update verifier
+  (encode_base64(h\final!)\gsub("+", "-")\gsub("/", "_")\gsub("=", ""))
+
+-- params set to false are left out of the request
+authorize = (app, params={}) ->
+  args = {
+    response_type: "code"
+    client_id: "connector-client"
+    redirect_uri: "https://client.example/callback"
+    code_challenge: s256_challenge VERIFIER
+    code_challenge_method: "S256"
+  }
+  for k, v in pairs params
+    args[k] = v or nil
+
+  simulate_request app, "/mcp/oauth/authorize?#{encode_query_string args}", {
+    headers: {
+      "Host": "example.com"
+      "X-Forwarded-Proto": "https"
+    }
+  }
+
 describe "oauth shim", ->
   it "serves protected resource metadata route", ->
     app = build_app "/mcp"
@@ -105,12 +133,10 @@ describe "oauth shim", ->
   it "serves authorization redirects", ->
     app = build_app "/mcp"
     redirect_uri = "https://client.example/callback"
-    status, body, headers = simulate_request app, "/mcp/oauth/authorize?#{encode_query_string {
-      response_type: "code"
-      client_id: "connector-client"
+    status, body, headers = authorize app, {
       redirect_uri: redirect_uri
       state: "test-state"
-    }}"
+    }
 
     assert.equal 302, status
     assert.is_string headers.location
@@ -118,6 +144,122 @@ describe "oauth shim", ->
     redirect_params = parse_query_string headers.location\match "%?(.*)$"
     assert.equal "test-state", redirect_params.state
     assert.is_not_nil redirect_params.code
+    assert.equal "https://example.com/mcp", redirect_params.iss
+
+  it "advertises only S256 PKCE and the iss parameter", ->
+    app = build_app "/mcp"
+    status, body = simulate_request app, "/.well-known/oauth-authorization-server/mcp"
+
+    assert.equal 200, status
+    result = json.decode body
+    assert.same {"S256"}, result.code_challenge_methods_supported
+    assert.is_true result.authorization_response_iss_parameter_supported
+
+  it "requires a PKCE code_challenge", ->
+    app = build_app "/mcp"
+    status, body = authorize app, { code_challenge: false, code_challenge_method: false }
+
+    assert.equal 400, status
+    assert.equal "invalid_request", json.decode(body).error
+
+  it "rejects plain and missing code_challenge_method", ->
+    app = build_app "/mcp"
+    for method in *{"plain", false}
+      status, body = authorize app, { code_challenge: VERIFIER, code_challenge_method: method }
+
+      assert.equal 400, status
+      assert.equal "code_challenge_method must be S256", json.decode(body).error_description
+
+  describe "authorization_code exchange", ->
+    get_code = (app) ->
+      status, body, headers = authorize app
+      assert.equal 302, status
+      parse_query_string(headers.location\match "%?(.*)$").code
+
+    exchange = (app, params) ->
+      args = {
+        grant_type: "authorization_code"
+        client_id: "connector-client"
+        client_secret: "connector-secret"
+        redirect_uri: "https://client.example/callback"
+        code_verifier: VERIFIER
+      }
+      for k, v in pairs params
+        args[k] = v
+
+      simulate_request app, "/mcp/oauth/token", {
+        method: "POST"
+        headers: { "Content-Type": "application/x-www-form-urlencoded" }
+        body: encode_query_string args
+      }
+
+    it "issues a token for the correct code_verifier", ->
+      app = build_app "/mcp"
+      status, body = exchange app, { code: get_code app }
+
+      assert.equal 200, status
+      assert.equal "connector-secret", json.decode(body).access_token
+
+    it "rejects the wrong code_verifier", ->
+      app = build_app "/mcp"
+      status, body = exchange app, { code: get_code(app), code_verifier: "wrong-verifier" }
+
+      assert.equal 400, status
+      assert.equal "PKCE verification failed", json.decode(body).error_description
+
+    it "rejects the wrong client_secret", ->
+      app = build_app "/mcp"
+      status, body = exchange app, { code: get_code(app), client_secret: "nope" }
+
+      assert.equal 401, status
+      assert.equal "invalid_client", json.decode(body).error
+
+  describe "allowed_redirect_uris", ->
+    restricted_app = ->
+      build_app "/mcp", {
+        client_id: "connector-client"
+        client_secret: "connector-secret"
+        allowed_redirect_uris: {
+          "https://client.example/callback"
+          "http://localhost/callback"
+          "http://127.0.0.1/callback"
+        }
+      }
+
+    it "allows listed redirect URIs", ->
+      status = authorize restricted_app!, { redirect_uri: "https://client.example/callback" }
+      assert.equal 302, status
+
+    it "allows any port on loopback redirect URIs", ->
+      for uri in *{"http://localhost:51234/callback", "http://127.0.0.1:8080/callback"}
+        status, body, headers = authorize restricted_app!, { redirect_uri: uri }
+        assert.equal 302, status
+        assert.equal uri, headers.location\match "^[^?]+"
+
+    it "rejects unlisted redirect URIs", ->
+      for uri in *{
+        "https://evil.example/callback"
+        "https://client.example:8443/callback"
+        "http://localhost:51234/other"
+        "https://localhost:51234/callback"
+      }
+        status, body = authorize restricted_app!, { redirect_uri: uri }
+        assert.equal 400, status
+        assert.equal "redirect_uri not allowed", json.decode(body).error_description
+
+  describe "verify_bearer", ->
+    import verify_bearer from oauth_shim
+
+    it "accepts any case of the Bearer scheme", ->
+      for header in *{"Bearer tok", "bearer tok", "BEARER tok"}
+        assert.is_true verify_bearer header, "tok"
+
+    it "rejects wrong tokens and schemes", ->
+      assert.is_false verify_bearer "Bearer toke", "tok"
+      assert.is_false verify_bearer "Bearer to", "tok"
+      assert.is_false verify_bearer "Basic tok", "tok"
+      assert.is_false verify_bearer nil, "tok"
+      assert.is_false verify_bearer "Bearer tok", nil
 
   it "serves token endpoint preflight", ->
     app = build_app "/mcp"

@@ -1,6 +1,8 @@
 local json = require("cjson.safe")
 local respond_to
 respond_to = require("lapis.application").respond_to
+local verify_bearer
+verify_bearer = require("lapis.mcp.oauth").verify_bearer
 local NOTIFICATION_CAPABILITY_FLAGS = {
   "listChanged",
   "subscribe"
@@ -127,20 +129,6 @@ server_class_for = function(server_module)
     return server_module
   end
 end
-local verify_static_bearer
-verify_static_bearer = function(header, expected)
-  if not (header and expected) then
-    return false
-  end
-  local scheme, token = header:match("^(%S+)%s+(.+)$")
-  if not (scheme and scheme:lower() == "bearer") then
-    return false
-  end
-  if not (token) then
-    return false
-  end
-  return token == expected
-end
 local mcp_handler
 mcp_handler = function(ServerClass, opts)
   if opts == nil then
@@ -190,7 +178,7 @@ mcp_handler = function(ServerClass, opts)
             return 
           end
         elseif bearer_token then
-          if not (verify_static_bearer(self.req.headers["authorization"], bearer_token)) then
+          if not (verify_bearer(self.req.headers["authorization"], bearer_token)) then
             self:write({
               json = {
                 error = "unauthorized"
