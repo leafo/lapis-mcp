@@ -1,6 +1,56 @@
 local json = require("cjson.safe")
 local respond_to
 respond_to = require("lapis.application").respond_to
+local SUPPORTED_PROTOCOL_VERSIONS = {
+  "2025-11-25",
+  "2025-06-18",
+  "2025-03-26",
+  "2024-11-05",
+  "2024-10-07"
+}
+local supported_protocol_versions
+supported_protocol_versions = function(server)
+  local versions = {
+    server.protocol_version
+  }
+  for _index_0 = 1, #SUPPORTED_PROTOCOL_VERSIONS do
+    local v = SUPPORTED_PROTOCOL_VERSIONS[_index_0]
+    if not (v == server.protocol_version) then
+      table.insert(versions, v)
+    end
+  end
+  return versions
+end
+local NOTIFICATION_CAPABILITY_FLAGS = {
+  "listChanged",
+  "subscribe"
+}
+local without_notifications
+without_notifications = function(capabilities)
+  local out = { }
+  for name, capability in pairs(capabilities) do
+    if type(capability) == "table" then
+      local copy
+      do
+        local _tbl_0 = { }
+        for k, v in pairs(capability) do
+          _tbl_0[k] = v
+        end
+        copy = _tbl_0
+      end
+      for _index_0 = 1, #NOTIFICATION_CAPABILITY_FLAGS do
+        local flag = NOTIFICATION_CAPABILITY_FLAGS[_index_0]
+        if copy[flag] ~= nil then
+          copy[flag] = false
+        end
+      end
+      out[name] = copy
+    else
+      out[name] = capability
+    end
+  end
+  return out
+end
 local HttpNoopTransport
 do
   local _class_0
@@ -52,7 +102,7 @@ build_cors_headers = function(origin, allowed_origin)
   return {
     ["Access-Control-Allow-Origin"] = allowed_origin,
     ["Access-Control-Allow-Methods"] = "POST, OPTIONS",
-    ["Access-Control-Allow-Headers"] = "Content-Type, Accept, Mcp-Session-Id, Authorization",
+    ["Access-Control-Allow-Headers"] = "Content-Type, Accept, Mcp-Session-Id, MCP-Protocol-Version, Authorization",
     ["Access-Control-Expose-Headers"] = "Mcp-Session-Id, WWW-Authenticate",
     ["Vary"] = "Origin"
   }
@@ -177,6 +227,7 @@ mcp_handler = function(ServerClass, opts)
       local server = ServerClass(opts.server_options or { })
       server:skip_initialize()
       server.transport = HttpNoopTransport()
+      server.server_capabilities = without_notifications(server.server_capabilities)
       if opts.load_session then
         opts.load_session(self, server)
       end
@@ -229,13 +280,41 @@ mcp_handler = function(ServerClass, opts)
           headers = self.cors_headers
         }
       end
+      local protocol_version = self.req.headers["mcp-protocol-version"]
+      local is_initialize = type(message) == "table" and message.method == "initialize"
+      if protocol_version ~= nil and not is_initialize then
+        local versions = supported_protocol_versions(self.mcp_server)
+        local is_supported = false
+        for _index_0 = 1, #versions do
+          local v = versions[_index_0]
+          if v == protocol_version then
+            is_supported = true
+            break
+          end
+        end
+        if not (is_supported) then
+          local request_id = type(message) == "table" and message.id
+          return {
+            json = {
+              jsonrpc = "2.0",
+              id = request_id or json.null,
+              error = {
+                code = -32000,
+                message = "Bad Request: Unsupported protocol version: " .. tostring(protocol_version) .. " (supported versions: " .. tostring(table.concat(versions, ", ")) .. ")"
+              }
+            },
+            status = 400,
+            headers = self.cors_headers
+          }
+        end
+      end
       local response = self.mcp_server:handle_message(message)
       if response then
         local out = {
           json = response,
           headers = self.cors_headers
         }
-        if type(message) == "table" and message.method == "initialize" and opts.create_session_id then
+        if is_initialize and opts.create_session_id then
           local session_id = opts.create_session_id(self, self.mcp_server)
           if session_id then
             out.headers = merge_headers(out.headers, {

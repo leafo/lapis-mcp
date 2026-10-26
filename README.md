@@ -737,7 +737,16 @@ always responds with `application/json` and never upgrades to SSE, so
 server-initiated messages (progress notifications, sampling, etc.) are not
 delivered. `GET` and `DELETE` on the endpoint return `405`. This is
 sufficient for tool-only servers; if your tools need to stream progress
-back to the client, you'll want a fuller transport.
+back to the client, you'll want a fuller transport. For the same reason, the
+server's capabilities are reported with `listChanged: false` and
+`subscribe: false` over HTTP, since those notifications have no way to reach
+the client.
+
+Requests with an `MCP-Protocol-Version` header naming a version the server
+doesn't support are rejected with `400`. The supported versions are the
+server's own `protocol_version` plus `2025-11-25`, `2025-06-18`, `2025-03-26`,
+`2024-11-05` and `2024-10-07`. Requests without the header, and `initialize`
+requests, are always accepted.
 
 #### HTTP Handler Options
 

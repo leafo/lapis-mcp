@@ -184,6 +184,149 @@ describe "mcp_handler", ->
 
       assert.equal 406, status
 
+    it "does not advertise list change notifications", ->
+      app = build_app!
+      status, body = simulate_request app, "/mcp", {
+        method: "POST"
+        headers: {
+          "Accept": "application/json, text/event-stream"
+          "Content-Type": "application/json"
+        }
+        body: json.encode {
+          jsonrpc: "2.0"
+          id: 1
+          method: "initialize"
+          params: {
+            protocolVersion: "2025-11-25"
+            capabilities: {}
+            clientInfo: { name: "test-client", version: "1.0" }
+          }
+        }
+      }
+
+      assert.equal 200, status
+      capabilities = json.decode(body).result.capabilities
+      assert.is_false capabilities.tools.listChanged
+      assert.is_false capabilities.resources.listChanged
+      assert.is_false capabilities.resources.subscribe
+
+      -- the server class defaults are untouched
+      assert.is_true TestServer!.server_capabilities.tools.listChanged
+
+    it "does not advertise resource subscriptions", ->
+      class SubscribeServer extends TestServer
+        new: (...) =>
+          super ...
+          @server_capabilities.resources.subscribe = true
+
+      class SubscribeApp extends lapis.Application
+        layout: false
+        "/mcp": mcp_handler SubscribeServer
+
+      status, body = simulate_request SubscribeApp, "/mcp", {
+        method: "POST"
+        headers: {
+          "Accept": "application/json, text/event-stream"
+          "Content-Type": "application/json"
+        }
+        body: json.encode {
+          jsonrpc: "2.0"
+          id: 1
+          method: "initialize"
+          params: {
+            protocolVersion: "2025-11-25"
+            capabilities: {}
+            clientInfo: { name: "test-client", version: "1.0" }
+          }
+        }
+      }
+
+      assert.equal 200, status
+      assert.is_false json.decode(body).result.capabilities.resources.subscribe
+
+  describe "MCP-Protocol-Version header", ->
+    post = (headers, message, server_class=TestServer) ->
+      class HeaderTestApp extends lapis.Application
+        layout: false
+        "/mcp": mcp_handler server_class
+
+      app = HeaderTestApp
+      all_headers = {
+        "Accept": "application/json, text/event-stream"
+        "Content-Type": "application/json"
+      }
+      for k, v in pairs headers
+        all_headers[k] = v
+
+      simulate_request app, "/mcp", {
+        method: "POST"
+        headers: all_headers
+        body: json.encode message
+      }
+
+    it "accepts supported versions", ->
+      for version in *{"2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05", "2024-10-07"}
+        status, body = post { "MCP-Protocol-Version": version }, {
+          jsonrpc: "2.0", id: 1, method: "tools/list"
+        }
+
+        assert.equal 200, status
+        assert.equal "hello", json.decode(body).result.tools[1].name
+
+    it "rejects unsupported versions", ->
+      status, body = post { "MCP-Protocol-Version": "1900-01-01" }, {
+        jsonrpc: "2.0", id: 1, method: "tools/list"
+      }
+
+      assert.equal 400, status
+      result = json.decode body
+      assert.equal -32000, result.error.code
+      assert.equal 1, result.id
+      assert.truthy result.error.message\find "Unsupported protocol version: 1900-01-01", 1, true
+
+    it "rejects unsupported versions on notifications", ->
+      status, body = post { "MCP-Protocol-Version": "1900-01-01" }, {
+        jsonrpc: "2.0", method: "notifications/initialized"
+      }
+
+      assert.equal 400, status
+      assert.equal json.null, json.decode(body).id
+
+    it "accepts the server's own protocol version", ->
+      class FutureServer extends TestServer
+        new: (...) =>
+          super ...
+          @protocol_version = "2099-01-01"
+
+      status, body = post { "MCP-Protocol-Version": "2099-01-01" }, {
+        jsonrpc: "2.0", id: 1, method: "tools/list"
+      }, FutureServer
+
+      assert.equal 200, status
+      assert.equal "hello", json.decode(body).result.tools[1].name
+
+      status, body = post { "MCP-Protocol-Version": "1900-01-01" }, {
+        jsonrpc: "2.0", id: 1, method: "tools/list"
+      }, FutureServer
+
+      assert.equal 400, status
+      assert.truthy json.decode(body).error.message\find "supported versions: 2099-01-01, 2025-11-25", 1, true
+
+    it "does not validate the header on initialize", ->
+      status, body = post { "MCP-Protocol-Version": "1900-01-01" }, {
+        jsonrpc: "2.0"
+        id: 1
+        method: "initialize"
+        params: {
+          protocolVersion: "2025-11-25"
+          capabilities: {}
+          clientInfo: { name: "test-client", version: "1.0" }
+        }
+      }
+
+      assert.equal 200, status
+      assert.equal "2025-11-25", json.decode(body).result.protocolVersion
+
   describe "origin validation", ->
     it "rejects requests with Origin header when no allowed_origins configured", ->
       app = build_app!
@@ -241,7 +384,7 @@ describe "mcp_handler", ->
       assert.equal 200, status
       assert.equal "https://good.com", headers["access_control_allow_origin"]
       assert.equal "POST, OPTIONS", headers["access_control_allow_methods"]
-      assert.equal "Content-Type, Accept, Mcp-Session-Id, Authorization", headers["access_control_allow_headers"]
+      assert.equal "Content-Type, Accept, Mcp-Session-Id, MCP-Protocol-Version, Authorization", headers["access_control_allow_headers"]
 
     it "rejects unlisted origin", ->
       app = build_app allowed_origins: {"https://good.com"}
@@ -271,7 +414,7 @@ describe "mcp_handler", ->
       assert.equal 204, status
       assert.equal "https://good.com", headers["access_control_allow_origin"]
       assert.equal "POST, OPTIONS", headers["access_control_allow_methods"]
-      assert.equal "Content-Type, Accept, Mcp-Session-Id, Authorization", headers["access_control_allow_headers"]
+      assert.equal "Content-Type, Accept, Mcp-Session-Id, MCP-Protocol-Version, Authorization", headers["access_control_allow_headers"]
       assert.equal "Mcp-Session-Id, WWW-Authenticate", headers["access_control_expose_headers"]
 
     it "rejects CORS preflight for disallowed origin", ->
