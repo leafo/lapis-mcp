@@ -895,7 +895,11 @@ the resulting code for an access token at `{mount_path}/oauth/token`. PKCE is
 required and only the `S256` method is accepted, as required by OAuth 2.1 and
 the MCP specification. The authorization redirect includes the `iss` parameter
 ([RFC 9207](https://datatracker.ietf.org/doc/html/rfc9207)) so clients can
-verify which server issued the code. The `client_credentials` grant is also
+verify which server issued the code. Once the client and `redirect_uri` are
+validated (a `redirect_uri` containing a `#` fragment is rejected), authorize
+errors such as a missing PKCE challenge are sent back to the client as an
+`error` redirect with `state` and `iss`; earlier errors are shown directly as
+a `400`. The `client_credentials` grant is also
 supported and does not use PKCE. The token endpoint accepts client credentials
 either as POST body parameters (`client_secret_post`) or as an
 `Authorization: Basic` header (`client_secret_basic`). Auth codes are

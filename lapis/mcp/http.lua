@@ -1,8 +1,11 @@
 local json = require("cjson.safe")
 local respond_to
 respond_to = require("lapis.application").respond_to
-local verify_bearer
-verify_bearer = require("lapis.mcp.oauth").verify_bearer
+local OauthConfig, verify_bearer
+do
+  local _obj_0 = require("lapis.mcp.oauth")
+  OauthConfig, verify_bearer = _obj_0.OauthConfig, _obj_0.verify_bearer
+end
 local NOTIFICATION_CAPABILITY_FLAGS = {
   "listChanged",
   "subscribe"
@@ -140,8 +143,7 @@ mcp_handler = function(ServerClass, opts)
   local mount_path = opts.path or "/"
   local oauth_config
   if oauth then
-    local oauth_shim = require("lapis.mcp.oauth")
-    oauth_config = oauth_shim.OauthConfig(oauth, mount_path)
+    oauth_config = OauthConfig(oauth, mount_path)
   end
   return respond_to({
     before = function(self)
@@ -338,7 +340,6 @@ do
       return self
     end,
     install = function(self, app)
-      local oauth_shim = require("lapis.mcp.oauth")
       local claimed = { }
       local claim_route
       claim_route = function(route, owner)
@@ -353,7 +354,7 @@ do
         local owner = "MCP mount " .. tostring(mount.path)
         claim_route(mount.path, owner)
         if mount.opts.oauth then
-          local config = oauth_shim.OauthConfig(mount.opts.oauth, mount.path)
+          local config = OauthConfig(mount.opts.oauth, mount.path)
           local routes = config:routes()
           for _index_1 = 1, #routes do
             local route = routes[_index_1]

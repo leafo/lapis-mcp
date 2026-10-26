@@ -155,20 +155,65 @@ describe "oauth shim", ->
     assert.same {"S256"}, result.code_challenge_methods_supported
     assert.is_true result.authorization_response_iss_parameter_supported
 
-  it "requires a PKCE code_challenge", ->
-    app = build_app "/mcp"
-    status, body = authorize app, { code_challenge: false, code_challenge_method: false }
+  describe "authorize errors", ->
+    -- returns the params of an error redirect back to the client
+    redirected_error = (status, headers) ->
+      assert.equal 302, status
+      assert.equal "https://client.example/callback", headers.location\match "^[^?]+"
+      params = parse_query_string headers.location\match "%?(.*)$"
+      assert.is_nil params.code
+      params
 
-    assert.equal 400, status
-    assert.equal "invalid_request", json.decode(body).error
+    it "redirects with an error when the PKCE code_challenge is missing", ->
+      app = build_app "/mcp"
+      status, body, headers = authorize app, {
+        code_challenge: false
+        code_challenge_method: false
+        state: "test-state"
+      }
 
-  it "rejects plain and missing code_challenge_method", ->
-    app = build_app "/mcp"
-    for method in *{"plain", false}
-      status, body = authorize app, { code_challenge: VERIFIER, code_challenge_method: method }
+      params = redirected_error status, headers
+      assert.equal "invalid_request", params.error
+      assert.equal "PKCE code_challenge is required", params.error_description
+      assert.equal "test-state", params.state
+      assert.equal "https://example.com/mcp", params.iss
+
+    it "redirects with an error for plain and missing code_challenge_method", ->
+      app = build_app "/mcp"
+      for method in *{"plain", false}
+        status, body, headers = authorize app, { code_challenge_method: method }
+
+        params = redirected_error status, headers
+        assert.equal "code_challenge_method must be S256", params.error_description
+
+    it "redirects with an error for a malformed S256 challenge", ->
+      app = build_app "/mcp"
+      for challenge in *{"abc", VERIFIER, "#{("a")\rep 42}!"}
+        status, body, headers = authorize app, { code_challenge: challenge }
+
+        params = redirected_error status, headers
+        assert.equal "code_challenge is not a valid S256 challenge", params.error_description
+
+    it "redirects with an error for an unsupported response_type", ->
+      app = build_app "/mcp"
+      status, body, headers = authorize app, { response_type: "token" }
+
+      params = redirected_error status, headers
+      assert.equal "unsupported_response_type", params.error
+
+    it "does not redirect when the client_id is unknown", ->
+      app = build_app "/mcp"
+      status, body = authorize app, { client_id: "other-client" }
 
       assert.equal 400, status
-      assert.equal "code_challenge_method must be S256", json.decode(body).error_description
+      assert.equal "invalid_client", json.decode(body).error
+
+    it "does not redirect to a redirect_uri with a fragment", ->
+      app = build_app "/mcp"
+      status, body = authorize app, { redirect_uri: "https://client.example/callback#frag" }
+
+      assert.equal 400, status
+      assert.equal "redirect_uri must not contain a fragment", json.decode(body).error_description
 
   describe "authorization_code exchange", ->
     get_code = (app) ->
@@ -223,15 +268,26 @@ describe "oauth shim", ->
           "https://client.example/callback"
           "http://localhost/callback"
           "http://127.0.0.1/callback"
+          "http://[::1]/callback"
         }
       }
+
+    it "requires allowed_redirect_uris to be an array of strings", ->
+      for bad in *{"https://client.example/callback", {"https://client.example/callback", 5}}
+        assert.has_error (->
+          oauth_shim.OauthConfig {
+            client_id: "connector-client"
+            client_secret: "connector-secret"
+            allowed_redirect_uris: bad
+          }
+        ), "oauth.allowed_redirect_uris must be an array of strings"
 
     it "allows listed redirect URIs", ->
       status = authorize restricted_app!, { redirect_uri: "https://client.example/callback" }
       assert.equal 302, status
 
     it "allows any port on loopback redirect URIs", ->
-      for uri in *{"http://localhost:51234/callback", "http://127.0.0.1:8080/callback"}
+      for uri in *{"http://localhost:51234/callback", "http://127.0.0.1:8080/callback", "http://[::1]:8080/callback", "http://[::1]/callback"}
         status, body, headers = authorize restricted_app!, { redirect_uri: uri }
         assert.equal 302, status
         assert.equal uri, headers.location\match "^[^?]+"
@@ -242,6 +298,8 @@ describe "oauth shim", ->
         "https://client.example:8443/callback"
         "http://localhost:51234/other"
         "https://localhost:51234/callback"
+        "http://[::1]:8080/other"
+        "http://[::2]:8080/callback"
       }
         status, body = authorize restricted_app!, { redirect_uri: uri }
         assert.equal 400, status
@@ -293,3 +351,23 @@ describe "oauth shim", ->
     result = json.decode body
     assert.equal "secret:value", result.access_token
     assert.equal "Bearer", result.token_type
+
+  it "accepts any case of the Basic scheme", ->
+    app = build_app "/"
+    import encode_base64 from require "lapis.util.encoding"
+    basic = encode_base64 "connector-client:connector-secret"
+
+    for scheme in *{"Basic", "basic", "BASIC"}
+      status, body = simulate_request app, "/oauth/token", {
+        method: "POST"
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded"
+          "Authorization": "#{scheme} #{basic}"
+        }
+        body: encode_query_string {
+          grant_type: "client_credentials"
+        }
+      }
+
+      assert.equal 200, status
+      assert.equal "connector-secret", json.decode(body).access_token

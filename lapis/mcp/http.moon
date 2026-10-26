@@ -1,7 +1,7 @@
 json = require "cjson.safe"
 
 import respond_to from require "lapis.application"
-import verify_bearer from require "lapis.mcp.oauth"
+import OauthConfig, verify_bearer from require "lapis.mcp.oauth"
 
 -- There is no stream to deliver server initiated notifications over HTTP, so
 -- don't advertise any capability that depends on them
@@ -83,8 +83,7 @@ mcp_handler = (ServerClass, opts={}) ->
   mount_path = opts.path or "/"
 
   oauth_config = if oauth
-    oauth_shim = require "lapis.mcp.oauth"
-    oauth_shim.OauthConfig oauth, mount_path
+    OauthConfig oauth, mount_path
 
   respond_to {
     before: =>
@@ -241,8 +240,6 @@ class McpHttpRouter
     @
 
   install: (app) =>
-    oauth_shim = require "lapis.mcp.oauth"
-
     claimed = {}
 
     claim_route = (route, owner) ->
@@ -255,7 +252,7 @@ class McpHttpRouter
       claim_route mount.path, owner
 
       if mount.opts.oauth
-        config = oauth_shim.OauthConfig mount.opts.oauth, mount.path
+        config = OauthConfig mount.opts.oauth, mount.path
         routes = config\routes!
         for route in *routes
           claim_route route.path, owner

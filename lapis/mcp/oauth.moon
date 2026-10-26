@@ -19,8 +19,8 @@ base64url_no_pad = (s) ->
   encoded = encode_base64 s
   (encoded\gsub("+", "-")\gsub("/", "_")\gsub("=", ""))
 
--- compares without exiting early, so timing doesn't reveal how much of a
--- secret matched
+-- doesn't exit early on the first mismatched byte, so timing doesn't reveal
+-- how much of a secret matched (the length is not hidden)
 secure_compare = (a, b) ->
   return false unless type(a) == "string" and type(b) == "string"
   return false unless #a == #b
@@ -31,12 +31,19 @@ secure_compare = (a, b) ->
 
   diff == 0
 
--- matches an Authorization header against an expected bearer token, the
+-- splits an Authorization header into a lowercased scheme and its value, the
 -- scheme is case insensitive (RFC 7235)
+parse_authorization = (header) ->
+  return nil unless type(header) == "string"
+  scheme, value = header\match "^(%S+)%s+(.+)$"
+  return nil unless scheme
+  scheme\lower!, value
+
+-- matches an Authorization header against an expected bearer token
 verify_bearer = (header, expected) ->
-  return false unless type(header) == "string" and expected
-  scheme, token = header\match "^(%S+)%s+(.+)$"
-  return false unless scheme and scheme\lower! == "bearer"
+  return false unless expected
+  scheme, token = parse_authorization header
+  return false unless scheme == "bearer"
   secure_compare token, expected
 
 -- only S256 is supported, as required by OAuth 2.1 and the MCP spec
@@ -47,6 +54,10 @@ verify_pkce = (verifier, challenge) ->
   h\update verifier
   secure_compare base64url_no_pad(h\final!), challenge
 
+-- an S256 challenge is a base64url encoded SHA-256 digest without padding
+is_s256_challenge = (challenge) ->
+  type(challenge) == "string" and #challenge == 43 and challenge\match("^[%w%-_]+$") != nil
+
 -- loopback redirect URIs may use any port (RFC 8252 section 7.3)
 LOOPBACK_HOSTS = {
   "localhost": true
@@ -55,10 +66,10 @@ LOOPBACK_HOSTS = {
 }
 
 parse_redirect_uri = (uri) ->
-  scheme, host, port, rest = uri\match "^(%a[%w+.-]*)://([^/:?#]+):?(%d*)(.*)$"
+  -- IPv6 literal hosts are bracketed, and contain colons
+  scheme, host, port, rest = uri\match "^(%a[%w+.-]*)://(%[[^%]]+%]):?(%d*)(.*)$"
   unless scheme
-    -- IPv6 literal host
-    scheme, host, port, rest = uri\match "^(%a[%w+.-]*)://(%[[^%]]+%]):?(%d*)(.*)$"
+    scheme, host, port, rest = uri\match "^(%a[%w+.-]*)://([^/:?#%[]+):?(%d*)(.*)$"
 
   return nil unless scheme
   scheme\lower!, host\lower!, port, rest
@@ -69,12 +80,22 @@ redirect_uri_allowed = (uri, allowed_uris) ->
   for allowed in *allowed_uris
     return true if uri == allowed
 
-    scheme, host, port, rest = parse_redirect_uri uri
-    a_scheme, a_host, a_port, a_rest = parse_redirect_uri allowed
-    if scheme and a_scheme and scheme == "http" and LOOPBACK_HOSTS[host]
-      return true if scheme == a_scheme and host == a_host and rest == a_rest
+  -- only http loopback URIs get the any port rule
+  scheme, host, _, rest = parse_redirect_uri uri
+  return false unless scheme == "http" and LOOPBACK_HOSTS[host]
+
+  for allowed in *allowed_uris
+    a_scheme, a_host, _, a_rest = parse_redirect_uri allowed
+    return true if scheme == a_scheme and host == a_host and rest == a_rest
 
   false
+
+-- appends response params to the client's redirect_uri
+redirect_to_client = (redirect_uri, params) ->
+  sep = redirect_uri\find("?", 1, true) and "&" or "?"
+  {
+    redirect_to: redirect_uri .. sep .. encode_query_string params
+  }
 
 decode_basic_part = (part) ->
   unescape part\gsub "%+", " "
@@ -83,6 +104,11 @@ class OauthConfig
   new: (@opts, @mount_path="/") =>
     assert @opts.client_id, "oauth.client_id is required"
     assert @opts.client_secret, "oauth.client_secret is required"
+
+    if uris = @opts.allowed_redirect_uris
+      assert type(uris) == "table", "oauth.allowed_redirect_uris must be an array of strings"
+      for uri in *uris
+        assert type(uri) == "string", "oauth.allowed_redirect_uris must be an array of strings"
 
   public_base_url: (req) =>
     scheme = req.headers["x-forwarded-proto"] or (req.parsed_url and req.parsed_url.scheme) or "http"
@@ -162,24 +188,44 @@ class OauthConfig
         -- RFC 7636 defaults a missing method to plain, which is not supported
         code_challenge_method = params.code_challenge_method or "plain"
 
-        unless response_type == "code"
-          return status: 400, json: {error: "unsupported_response_type"}
-
+        -- Errors before redirect_uri is validated must not redirect, they are
+        -- shown to the user directly (RFC 6749 section 4.1.2.1)
         unless client_id == config.opts.client_id
           return status: 400, json: {error: "invalid_client"}
 
-        unless redirect_uri
+        unless type(redirect_uri) == "string"
           return status: 400, json: {error: "invalid_request", error_description: "missing redirect_uri"}
+
+        if redirect_uri\find "#", 1, true
+          return status: 400, json: {error: "invalid_request", error_description: "redirect_uri must not contain a fragment"}
 
         if config.opts.allowed_redirect_uris
           unless redirect_uri_allowed redirect_uri, config.opts.allowed_redirect_uris
             return status: 400, json: {error: "invalid_request", error_description: "redirect_uri not allowed"}
 
+        -- RFC 9207 issuer identification, lets the client detect mix-up
+        -- attacks, included on both success and error responses
+        iss = config\issuer_url route.req
+
+        redirect_error = (error_code, description) ->
+          redirect_to_client redirect_uri, {
+            error: error_code
+            error_description: description
+            :state
+            :iss
+          }
+
+        unless response_type == "code"
+          return redirect_error "unsupported_response_type", "response_type must be code"
+
         unless code_challenge and code_challenge != ""
-          return status: 400, json: {error: "invalid_request", error_description: "PKCE code_challenge is required"}
+          return redirect_error "invalid_request", "PKCE code_challenge is required"
 
         unless code_challenge_method == "S256"
-          return status: 400, json: {error: "invalid_request", error_description: "code_challenge_method must be S256"}
+          return redirect_error "invalid_request", "code_challenge_method must be S256"
+
+        unless is_s256_challenge code_challenge
+          return redirect_error "invalid_request", "code_challenge is not a valid S256 challenge"
 
         code = encode_with_secret {
           cid: client_id
@@ -188,13 +234,10 @@ class OauthConfig
           exp: os.time! + 600
         }, config.opts.client_secret
 
-        -- RFC 9207 issuer identification, lets the client detect mix-up attacks
-        qs_params = {code: code, iss: config\issuer_url route.req}
-        qs_params.state = state if state
-
-        sep = redirect_uri\find("?", 1, true) and "&" or "?"
-        {
-          redirect_to: redirect_uri .. sep .. encode_query_string qs_params
+        redirect_to_client redirect_uri, {
+          :code
+          :state
+          :iss
         }
     }
 
@@ -247,14 +290,13 @@ class OauthConfig
         client_id = args.client_id
         client_secret = args.client_secret
 
-        if auth_header
-          basic_creds = auth_header\match "^[Bb]asic (.+)$"
-          if basic_creds
-            decoded = decode_base64 basic_creds
-            if decoded
-              cid, csec = decoded\match "^([^:]*):(.*)$"
-              client_id = decode_basic_part cid if cid
-              client_secret = decode_basic_part csec if csec
+        scheme, basic_creds = parse_authorization auth_header
+        if scheme == "basic"
+          decoded = decode_base64 basic_creds
+          if decoded
+            cid, csec = decoded\match "^([^:]*):(.*)$"
+            client_id = decode_basic_part cid if cid
+            client_secret = decode_basic_part csec if csec
 
         unless client_id == config.opts.client_id and secure_compare client_secret, config.opts.client_secret
           return error_response 401, "invalid_client"

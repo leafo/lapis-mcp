@@ -32,13 +32,24 @@ secure_compare = function(a, b)
   end
   return diff == 0
 end
+local parse_authorization
+parse_authorization = function(header)
+  if not (type(header) == "string") then
+    return nil
+  end
+  local scheme, value = header:match("^(%S+)%s+(.+)$")
+  if not (scheme) then
+    return nil
+  end
+  return scheme:lower(), value
+end
 local verify_bearer
 verify_bearer = function(header, expected)
-  if not (type(header) == "string" and expected) then
+  if not (expected) then
     return false
   end
-  local scheme, token = header:match("^(%S+)%s+(.+)$")
-  if not (scheme and scheme:lower() == "bearer") then
+  local scheme, token = parse_authorization(header)
+  if not (scheme == "bearer") then
     return false
   end
   return secure_compare(token, expected)
@@ -53,6 +64,10 @@ verify_pkce = function(verifier, challenge)
   h:update(verifier)
   return secure_compare(base64url_no_pad(h:final()), challenge)
 end
+local is_s256_challenge
+is_s256_challenge = function(challenge)
+  return type(challenge) == "string" and #challenge == 43 and challenge:match("^[%w%-_]+$") ~= nil
+end
 local LOOPBACK_HOSTS = {
   ["localhost"] = true,
   ["127.0.0.1"] = true,
@@ -60,9 +75,9 @@ local LOOPBACK_HOSTS = {
 }
 local parse_redirect_uri
 parse_redirect_uri = function(uri)
-  local scheme, host, port, rest = uri:match("^(%a[%w+.-]*)://([^/:?#]+):?(%d*)(.*)$")
+  local scheme, host, port, rest = uri:match("^(%a[%w+.-]*)://(%[[^%]]+%]):?(%d*)(.*)$")
   if not (scheme) then
-    scheme, host, port, rest = uri:match("^(%a[%w+.-]*)://(%[[^%]]+%]):?(%d*)(.*)$")
+    scheme, host, port, rest = uri:match("^(%a[%w+.-]*)://([^/:?#%[]+):?(%d*)(.*)$")
   end
   if not (scheme) then
     return nil
@@ -79,15 +94,27 @@ redirect_uri_allowed = function(uri, allowed_uris)
     if uri == allowed then
       return true
     end
-    local scheme, host, port, rest = parse_redirect_uri(uri)
-    local a_scheme, a_host, a_port, a_rest = parse_redirect_uri(allowed)
-    if scheme and a_scheme and scheme == "http" and LOOPBACK_HOSTS[host] then
-      if scheme == a_scheme and host == a_host and rest == a_rest then
-        return true
-      end
+  end
+  local scheme, host, _, rest = parse_redirect_uri(uri)
+  if not (scheme == "http" and LOOPBACK_HOSTS[host]) then
+    return false
+  end
+  for _index_0 = 1, #allowed_uris do
+    local allowed = allowed_uris[_index_0]
+    local a_scheme, a_host, a_rest
+    a_scheme, a_host, _, a_rest = parse_redirect_uri(allowed)
+    if scheme == a_scheme and host == a_host and rest == a_rest then
+      return true
     end
   end
   return false
+end
+local redirect_to_client
+redirect_to_client = function(redirect_uri, params)
+  local sep = redirect_uri:find("?", 1, true) and "&" or "?"
+  return {
+    redirect_to = redirect_uri .. sep .. encode_query_string(params)
+  }
 end
 local decode_basic_part
 decode_basic_part = function(part)
@@ -199,14 +226,6 @@ do
           local state = params.state
           local code_challenge = params.code_challenge
           local code_challenge_method = params.code_challenge_method or "plain"
-          if not (response_type == "code") then
-            return {
-              status = 400,
-              json = {
-                error = "unsupported_response_type"
-              }
-            }
-          end
           if not (client_id == config.opts.client_id) then
             return {
               status = 400,
@@ -215,12 +234,21 @@ do
               }
             }
           end
-          if not (redirect_uri) then
+          if not (type(redirect_uri) == "string") then
             return {
               status = 400,
               json = {
                 error = "invalid_request",
                 error_description = "missing redirect_uri"
+              }
+            }
+          end
+          if redirect_uri:find("#", 1, true) then
+            return {
+              status = 400,
+              json = {
+                error = "invalid_request",
+                error_description = "redirect_uri must not contain a fragment"
               }
             }
           end
@@ -235,23 +263,27 @@ do
               }
             end
           end
+          local iss = config:issuer_url(route.req)
+          local redirect_error
+          redirect_error = function(error_code, description)
+            return redirect_to_client(redirect_uri, {
+              error = error_code,
+              error_description = description,
+              state = state,
+              iss = iss
+            })
+          end
+          if not (response_type == "code") then
+            return redirect_error("unsupported_response_type", "response_type must be code")
+          end
           if not (code_challenge and code_challenge ~= "") then
-            return {
-              status = 400,
-              json = {
-                error = "invalid_request",
-                error_description = "PKCE code_challenge is required"
-              }
-            }
+            return redirect_error("invalid_request", "PKCE code_challenge is required")
           end
           if not (code_challenge_method == "S256") then
-            return {
-              status = 400,
-              json = {
-                error = "invalid_request",
-                error_description = "code_challenge_method must be S256"
-              }
-            }
+            return redirect_error("invalid_request", "code_challenge_method must be S256")
+          end
+          if not (is_s256_challenge(code_challenge)) then
+            return redirect_error("invalid_request", "code_challenge is not a valid S256 challenge")
           end
           local code = encode_with_secret({
             cid = client_id,
@@ -259,17 +291,11 @@ do
             cc = code_challenge,
             exp = os.time() + 600
           }, config.opts.client_secret)
-          local qs_params = {
+          return redirect_to_client(redirect_uri, {
             code = code,
-            iss = config:issuer_url(route.req)
-          }
-          if state then
-            qs_params.state = state
-          end
-          local sep = redirect_uri:find("?", 1, true) and "&" or "?"
-          return {
-            redirect_to = redirect_uri .. sep .. encode_query_string(qs_params)
-          }
+            state = state,
+            iss = iss
+          })
         end
       })
     end,
@@ -342,18 +368,16 @@ do
           local auth_header = route.req.headers["authorization"]
           local client_id = args.client_id
           local client_secret = args.client_secret
-          if auth_header then
-            local basic_creds = auth_header:match("^[Bb]asic (.+)$")
-            if basic_creds then
-              local decoded = decode_base64(basic_creds)
-              if decoded then
-                local cid, csec = decoded:match("^([^:]*):(.*)$")
-                if cid then
-                  client_id = decode_basic_part(cid)
-                end
-                if csec then
-                  client_secret = decode_basic_part(csec)
-                end
+          local scheme, basic_creds = parse_authorization(auth_header)
+          if scheme == "basic" then
+            local decoded = decode_base64(basic_creds)
+            if decoded then
+              local cid, csec = decoded:match("^([^:]*):(.*)$")
+              if cid then
+                client_id = decode_basic_part(cid)
+              end
+              if csec then
+                client_secret = decode_basic_part(csec)
               end
             end
           end
@@ -429,7 +453,17 @@ do
       end
       self.opts, self.mount_path = opts, mount_path
       assert(self.opts.client_id, "oauth.client_id is required")
-      return assert(self.opts.client_secret, "oauth.client_secret is required")
+      assert(self.opts.client_secret, "oauth.client_secret is required")
+      do
+        local uris = self.opts.allowed_redirect_uris
+        if uris then
+          assert(type(uris) == "table", "oauth.allowed_redirect_uris must be an array of strings")
+          for _index_0 = 1, #uris do
+            local uri = uris[_index_0]
+            assert(type(uri) == "string", "oauth.allowed_redirect_uris must be an array of strings")
+          end
+        end
+      end
     end,
     __base = _base_0,
     __name = "OauthConfig"
