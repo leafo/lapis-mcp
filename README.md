@@ -744,9 +744,10 @@ the client.
 
 Requests with an `MCP-Protocol-Version` header naming a version the server
 doesn't support are rejected with `400`. The supported versions are the
-server's own `protocol_version` plus `2025-11-25`, `2025-06-18`, `2025-03-26`,
-`2024-11-05` and `2024-10-07`. Requests without the header, and `initialize`
-requests, are always accepted.
+server's own `protocol_version` plus the class's `@supported_protocol_versions`
+(by default `2025-11-25`, `2025-06-18`, `2025-03-26`, `2024-11-05` and
+`2024-10-07`), the same list used to negotiate the version in `initialize`.
+Requests without the header, and `initialize` requests, are always accepted.
 
 #### HTTP Handler Options
 

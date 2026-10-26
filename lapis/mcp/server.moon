@@ -149,6 +149,16 @@ class McpServer
   -- @server_name: "lapis-mcp"
   @server_version: "1.0.0"
   @server_vendor: "Lapis"
+
+  -- older protocol versions a client may negotiate in addition to
+  -- protocol_version, matches the list accepted by the official TypeScript SDK
+  @supported_protocol_versions: {
+    "2025-11-25"
+    "2025-06-18"
+    "2025-03-26"
+    "2024-11-05"
+    "2024-10-07"
+  }
   -- @server_title: nil
   -- @server_description: nil
   -- @server_icons: nil
@@ -534,7 +544,7 @@ class McpServer
     -- Extract client info
     client_info = params.clientInfo or {}
     client_capabilities = params.capabilities or {}
-    requested_version = params.protocolVersion or "2025-06-18"
+    requested_version = params.protocolVersion
 
     @debug_log "info", "Initializing server with protocol version: #{requested_version}"
     if client_info.name
@@ -543,18 +553,36 @@ class McpServer
     -- Store client capabilities
     @client_capabilities = client_capabilities
 
-    -- Version negotiation: respond with our supported version, let client decide compatibility
-    if requested_version != @protocol_version
-      @debug_log "warn", "Client requested protocol version #{requested_version}, responding with #{@protocol_version}"
+    -- Version negotiation: echo the requested version if we support it,
+    -- otherwise respond with our own and let the client decide compatibility
+    negotiated_version = @protocol_version
+    for v in *@get_supported_protocol_versions!
+      if v == requested_version
+        negotiated_version = v
+        break
+
+    if negotiated_version != requested_version
+      @debug_log "warn", "Client requested protocol version #{requested_version}, responding with #{negotiated_version}"
 
     @initialized = true
     @debug_log "success", "Server initialized"
 
+    result = @server_specification!
+    result.protocolVersion = negotiated_version
+
     {
       jsonrpc: "2.0"
       id: message.id
-      result: @server_specification!
+      :result
     }
+
+  -- All protocol versions this server accepts, preferred version first
+  get_supported_protocol_versions: =>
+    versions = { @protocol_version }
+    for v in *@@supported_protocol_versions
+      table.insert versions, v unless v == @protocol_version
+
+    versions
 
   get_server_name: =>
     @@server_name or @@__name
@@ -724,8 +752,8 @@ class McpServer
       continue unless resource.uriTemplate
 
       -- Check instance visibility override first, then resource default
-      is_visible = if @tool_visibility[resource.uri] != nil
-        @tool_visibility[resource.uri]
+      is_visible = if @tool_visibility[resource.uriTemplate] != nil
+        @tool_visibility[resource.uriTemplate]
       else
         not resource.hidden
 

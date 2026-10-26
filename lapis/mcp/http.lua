@@ -1,26 +1,6 @@
 local json = require("cjson.safe")
 local respond_to
 respond_to = require("lapis.application").respond_to
-local SUPPORTED_PROTOCOL_VERSIONS = {
-  "2025-11-25",
-  "2025-06-18",
-  "2025-03-26",
-  "2024-11-05",
-  "2024-10-07"
-}
-local supported_protocol_versions
-supported_protocol_versions = function(server)
-  local versions = {
-    server.protocol_version
-  }
-  for _index_0 = 1, #SUPPORTED_PROTOCOL_VERSIONS do
-    local v = SUPPORTED_PROTOCOL_VERSIONS[_index_0]
-    if not (v == server.protocol_version) then
-      table.insert(versions, v)
-    end
-  end
-  return versions
-end
 local NOTIFICATION_CAPABILITY_FLAGS = {
   "listChanged",
   "subscribe"
@@ -283,7 +263,7 @@ mcp_handler = function(ServerClass, opts)
       local protocol_version = self.req.headers["mcp-protocol-version"]
       local is_initialize = type(message) == "table" and message.method == "initialize"
       if protocol_version ~= nil and not is_initialize then
-        local versions = supported_protocol_versions(self.mcp_server)
+        local versions = self.mcp_server:get_supported_protocol_versions()
         local is_supported = false
         for _index_0 = 1, #versions do
           local v = versions[_index_0]

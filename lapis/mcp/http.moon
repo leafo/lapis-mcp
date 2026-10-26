@@ -2,25 +2,6 @@ json = require "cjson.safe"
 
 import respond_to from require "lapis.application"
 
--- MCP-Protocol-Version header values accepted on non-initialize requests,
--- matches the list accepted by the official TypeScript SDK
-SUPPORTED_PROTOCOL_VERSIONS = {
-  "2025-11-25"
-  "2025-06-18"
-  "2025-03-26"
-  "2024-11-05"
-  "2024-10-07"
-}
-
--- the version the server reports from initialize is always accepted, even
--- if it isn't in the list above
-supported_protocol_versions = (server) ->
-  versions = { server.protocol_version }
-  for v in *SUPPORTED_PROTOCOL_VERSIONS
-    table.insert versions, v unless v == server.protocol_version
-
-  versions
-
 -- There is no stream to deliver server initiated notifications over HTTP, so
 -- don't advertise any capability that depends on them
 NOTIFICATION_CAPABILITY_FLAGS = { "listChanged", "subscribe" }
@@ -207,7 +188,7 @@ mcp_handler = (ServerClass, opts={}) ->
       protocol_version = @req.headers["mcp-protocol-version"]
       is_initialize = type(message) == "table" and message.method == "initialize"
       if protocol_version != nil and not is_initialize
-        versions = supported_protocol_versions @mcp_server
+        versions = @mcp_server\get_supported_protocol_versions!
         is_supported = false
         for v in *versions
           if v == protocol_version

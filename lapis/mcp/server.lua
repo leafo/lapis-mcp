@@ -455,22 +455,46 @@ do
       local params = get_params(message)
       local client_info = params.clientInfo or { }
       local client_capabilities = params.capabilities or { }
-      local requested_version = params.protocolVersion or "2025-06-18"
+      local requested_version = params.protocolVersion
       self:debug_log("info", "Initializing server with protocol version: " .. tostring(requested_version))
       if client_info.name then
         self:debug_log("debug", "Client: " .. tostring(client_info.name) .. " v" .. tostring(client_info.version or 'unknown'))
       end
       self.client_capabilities = client_capabilities
-      if requested_version ~= self.protocol_version then
-        self:debug_log("warn", "Client requested protocol version " .. tostring(requested_version) .. ", responding with " .. tostring(self.protocol_version))
+      local negotiated_version = self.protocol_version
+      local _list_0 = self:get_supported_protocol_versions()
+      for _index_0 = 1, #_list_0 do
+        local v = _list_0[_index_0]
+        if v == requested_version then
+          negotiated_version = v
+          break
+        end
+      end
+      if negotiated_version ~= requested_version then
+        self:debug_log("warn", "Client requested protocol version " .. tostring(requested_version) .. ", responding with " .. tostring(negotiated_version))
       end
       self.initialized = true
       self:debug_log("success", "Server initialized")
+      local result = self:server_specification()
+      result.protocolVersion = negotiated_version
       return {
         jsonrpc = "2.0",
         id = message.id,
-        result = self:server_specification()
+        result = result
       }
+    end,
+    get_supported_protocol_versions = function(self)
+      local versions = {
+        self.protocol_version
+      }
+      local _list_0 = self.__class.supported_protocol_versions
+      for _index_0 = 1, #_list_0 do
+        local v = _list_0[_index_0]
+        if not (v == self.protocol_version) then
+          table.insert(versions, v)
+        end
+      end
+      return versions
     end,
     get_server_name = function(self)
       return self.__class.server_name or self.__class.__name
@@ -698,8 +722,8 @@ do
               break
             end
             local is_visible
-            if self.tool_visibility[resource.uri] ~= nil then
-              is_visible = self.tool_visibility[resource.uri]
+            if self.tool_visibility[resource.uriTemplate] ~= nil then
+              is_visible = self.tool_visibility[resource.uriTemplate]
             else
               is_visible = not resource.hidden
             end
@@ -911,6 +935,13 @@ do
   local self = _class_0
   self.server_version = "1.0.0"
   self.server_vendor = "Lapis"
+  self.supported_protocol_versions = {
+    "2025-11-25",
+    "2025-06-18",
+    "2025-03-26",
+    "2024-11-05",
+    "2024-10-07"
+  }
   self.run_cli = function(self, config)
     local run_cli
     run_cli = require("lapis.mcp.cli").run_cli

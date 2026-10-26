@@ -730,6 +730,55 @@ describe "McpServer", ->
       assert.equal "2025-11-25", response.result.protocolVersion
       assert.is_true server.initialized
 
+    it "should echo a supported older protocol version", ->
+      for version in *{"2025-06-18", "2025-03-26", "2024-11-05", "2024-10-07"}
+        response = McpServer!\handle_initialize {
+          jsonrpc: "2.0"
+          id: 1
+          method: "initialize"
+          params: {
+            protocolVersion: version
+          }
+        }
+
+        assert.equal version, response.result.protocolVersion
+
+    it "should respond with its own version when none is requested", ->
+      response = server\handle_initialize {
+        jsonrpc: "2.0"
+        id: 1
+        method: "initialize"
+      }
+
+      assert.equal "2025-11-25", response.result.protocolVersion
+
+    it "should not change the server's protocol_version when negotiating", ->
+      server\handle_initialize {
+        jsonrpc: "2.0"
+        id: 1
+        method: "initialize"
+        params: {
+          protocolVersion: "2025-06-18"
+        }
+      }
+
+      assert.equal "2025-11-25", server.protocol_version
+      assert.equal "2025-11-25", server\server_specification!.protocolVersion
+
+    it "should list supported protocol versions with its own first", ->
+      class FutureServer extends McpServer
+        new: (...) =>
+          super ...
+          @protocol_version = "2099-01-01"
+
+      assert.same {
+        "2099-01-01", "2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05", "2024-10-07"
+      }, FutureServer!\get_supported_protocol_versions!
+
+      assert.same {
+        "2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05", "2024-10-07"
+      }, McpServer!\get_supported_protocol_versions!
+
     it "should include new serverInfo fields when class attrs are set", ->
       class CustomServer extends McpServer
         @server_title: "My Custom Server"
@@ -2577,6 +2626,19 @@ describe "McpServer", ->
               }
             }
           }, response
+
+        it "should hide templates by uriTemplate", ->
+          with_mock_transport server
+          server\skip_initialize!
+          server\set_tool_visibility "app://users/{userId}", false
+
+          response = server\handle_resources_templates_list {
+            jsonrpc: "2.0"
+            id: 1
+            method: "resources/templates/list"
+          }
+
+          assert.same {}, response.result.resourceTemplates
 
       describe "template resource inheritance", ->
         it "should handle template resource inheritance", ->
