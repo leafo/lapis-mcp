@@ -1,109 +1,21 @@
--- Fake OAuth shim for static service token authentication.
--- Implements the minimum OAuth 2.0 endpoints required by Claude connectors
--- (and other RFC 8414 / RFC 9728 / RFC 6749 clients) without an actual login
--- step. Auth codes are stateless: HMAC-signed JSON using the configured
--- client_secret. The issued access_token is the configured access_token (or
--- the client_secret if no access_token is provided).
+-- OAuth 2.0 endpoints required by Claude connectors and other MCP clients:
+-- RFC 9728 protected resource metadata, RFC 8414 authorization server
+-- metadata, the authorize endpoint and the token endpoint.
 --
--- Because codes are not stored, a code can be redeemed more than once until
--- it expires. Every redemption still requires the client secret and the PKCE
--- verifier, and always yields the same static token.
+-- The validation every authorization request needs (redirect_uri, PKCE S256,
+-- RFC 9207 iss) happens here. How clients are identified, approved and issued
+-- tokens is up to the mode. The only mode is StaticMode, see
+-- lapis.mcp.oauth.static.
 
 json = require "cjson.safe"
 
 import respond_to from require "lapis.application"
-import encode_base64, encode_with_secret, decode_with_secret, decode_base64 from require "lapis.util.encoding"
-import encode_query_string, unescape from require "lapis.util"
-
-base64url_no_pad = (s) ->
-  encoded = encode_base64 s
-  (encoded\gsub("+", "-")\gsub("/", "_")\gsub("=", ""))
-
--- doesn't exit early on the first mismatched byte, so timing doesn't reveal
--- how much of a secret matched (the length is not hidden)
-secure_compare = (a, b) ->
-  return false unless type(a) == "string" and type(b) == "string"
-  return false unless #a == #b
-
-  diff = 0
-  for i=1,#a
-    diff += 1 unless a\byte(i) == b\byte(i)
-
-  diff == 0
-
--- splits an Authorization header into a lowercased scheme and its value, the
--- scheme is case insensitive (RFC 7235)
-parse_authorization = (header) ->
-  return nil unless type(header) == "string"
-  scheme, value = header\match "^(%S+)%s+(.+)$"
-  return nil unless scheme
-  scheme\lower!, value
-
--- matches an Authorization header against an expected bearer token
-verify_bearer = (header, expected) ->
-  return false unless expected
-  scheme, token = parse_authorization header
-  return false unless scheme == "bearer"
-  secure_compare token, expected
-
--- only S256 is supported, as required by OAuth 2.1 and the MCP spec
-verify_pkce = (verifier, challenge) ->
-  return false unless type(verifier) == "string" and type(challenge) == "string"
-  digest = require "openssl.digest"
-  h = digest.new "sha256"
-  h\update verifier
-  secure_compare base64url_no_pad(h\final!), challenge
-
--- an S256 challenge is a base64url encoded SHA-256 digest without padding
-is_s256_challenge = (challenge) ->
-  type(challenge) == "string" and #challenge == 43 and challenge\match("^[%w%-_]+$") != nil
-
--- loopback redirect URIs may use any port (RFC 8252 section 7.3)
-LOOPBACK_HOSTS = {
-  "localhost": true
-  "127.0.0.1": true
-  "[::1]": true
-}
-
-parse_redirect_uri = (uri) ->
-  -- IPv6 literal hosts are bracketed, and contain colons
-  scheme, host, port, rest = uri\match "^(%a[%w+.-]*)://(%[[^%]]+%]):?(%d*)(.*)$"
-  unless scheme
-    scheme, host, port, rest = uri\match "^(%a[%w+.-]*)://([^/:?#%[]+):?(%d*)(.*)$"
-
-  return nil unless scheme
-  scheme\lower!, host\lower!, port, rest
-
-redirect_uri_allowed = (uri, allowed_uris) ->
-  return false unless type(uri) == "string"
-
-  for allowed in *allowed_uris
-    return true if uri == allowed
-
-  -- only http loopback URIs get the any port rule
-  scheme, host, _, rest = parse_redirect_uri uri
-  return false unless scheme == "http" and LOOPBACK_HOSTS[host]
-
-  for allowed in *allowed_uris
-    a_scheme, a_host, _, a_rest = parse_redirect_uri allowed
-    return true if scheme == a_scheme and host == a_host and rest == a_rest
-
-  false
-
--- appends response params to the client's redirect_uri
-redirect_to_client = (redirect_uri, params) ->
-  sep = redirect_uri\find("?", 1, true) and "&" or "?"
-  {
-    redirect_to: redirect_uri .. sep .. encode_query_string params
-  }
-
-decode_basic_part = (part) ->
-  unescape part\gsub "%+", " "
+import verify_bearer, is_s256_challenge, redirect_uri_allowed, redirect_to_client from require "lapis.mcp.oauth.util"
+import StaticMode from require "lapis.mcp.oauth.static"
 
 class OauthConfig
   new: (@opts, @mount_path="/") =>
-    assert @opts.client_id, "oauth.client_id is required"
-    assert @opts.client_secret, "oauth.client_secret is required"
+    @mode = StaticMode @opts
 
     if uris = @opts.allowed_redirect_uris
       assert type(uris) == "table", "oauth.allowed_redirect_uris must be an array of strings"
@@ -136,7 +48,7 @@ class OauthConfig
     "#{base}#{segment}"
 
   verify_bearer_token: (header) =>
-    verify_bearer header, @opts.access_token or @opts.client_secret
+    @mode\verify_bearer_token header
 
   protected_resource_handler: =>
     config = @
@@ -158,17 +70,20 @@ class OauthConfig
     config = @
     (route) ->
       issuer = config\issuer_url route.req
+      metadata = {
+        issuer: issuer
+        authorization_endpoint: "#{issuer}/oauth/authorize"
+        token_endpoint: "#{issuer}/oauth/token"
+        response_types_supported: setmetatable {"code"}, json.array_mt
+        code_challenge_methods_supported: setmetatable {"S256"}, json.array_mt
+        authorization_response_iss_parameter_supported: true
+      }
+
+      for k, v in pairs config.mode\server_metadata!
+        metadata[k] = v
+
       {
-        json: {
-          issuer: issuer
-          authorization_endpoint: "#{issuer}/oauth/authorize"
-          token_endpoint: "#{issuer}/oauth/token"
-          response_types_supported: setmetatable {"code"}, json.array_mt
-          grant_types_supported: setmetatable {"authorization_code", "client_credentials"}, json.array_mt
-          code_challenge_methods_supported: setmetatable {"S256"}, json.array_mt
-          token_endpoint_auth_methods_supported: setmetatable {"client_secret_post", "client_secret_basic"}, json.array_mt
-          authorization_response_iss_parameter_supported: true
-        }
+        json: metadata
         headers: {
           ["Cache-Control"]: "public, max-age=3600"
           ["Access-Control-Allow-Origin"]: "*"
@@ -190,8 +105,8 @@ class OauthConfig
 
         -- Errors before redirect_uri is validated must not redirect, they are
         -- shown to the user directly (RFC 6749 section 4.1.2.1)
-        unless client_id == config.opts.client_id
-          return status: 400, json: {error: "invalid_client"}
+        if err_response = config.mode\check_client client_id
+          return err_response
 
         unless type(redirect_uri) == "string"
           return status: 400, json: {error: "invalid_request", error_description: "missing redirect_uri"}
@@ -227,16 +142,11 @@ class OauthConfig
         unless is_s256_challenge code_challenge
           return redirect_error "invalid_request", "code_challenge is not a valid S256 challenge"
 
-        code = encode_with_secret {
-          cid: client_id
-          ru: redirect_uri
-          cc: code_challenge
-          exp: os.time! + 600
-        }, config.opts.client_secret
-
-        redirect_to_client redirect_uri, {
-          :code
+        config.mode\authorize route, {
+          :client_id
+          :redirect_uri
           :state
+          :code_challenge
           :iss
         }
     }
@@ -255,18 +165,6 @@ class OauthConfig
         out[k] = v
       out
 
-    issue_token = ->
-      {
-        json: {
-          access_token: config.opts.access_token or config.opts.client_secret
-          token_type: "Bearer"
-          expires_in: config.opts.access_token_ttl or 3600
-        }
-        headers: merge cors_headers, {
-          ["Cache-Control"]: "no-store"
-        }
-      }
-
     error_response = (status, code, description) ->
       body = {error: code}
       body.error_description = description if description
@@ -284,41 +182,16 @@ class OauthConfig
         status: 204, layout: false, headers: cors_headers
 
       POST: (route) ->
-        args = route.params
+        token, status, code, description = config.mode\token_request route
+        unless token
+          return error_response status, code, description
 
-        auth_header = route.req.headers["authorization"]
-        client_id = args.client_id
-        client_secret = args.client_secret
-
-        scheme, basic_creds = parse_authorization auth_header
-        if scheme == "basic"
-          decoded = decode_base64 basic_creds
-          if decoded
-            cid, csec = decoded\match "^([^:]*):(.*)$"
-            client_id = decode_basic_part cid if cid
-            client_secret = decode_basic_part csec if csec
-
-        unless client_id == config.opts.client_id and secure_compare client_secret, config.opts.client_secret
-          return error_response 401, "invalid_client"
-
-        switch args.grant_type
-          when "authorization_code"
-            code_data, err = decode_with_secret args.code or "", config.opts.client_secret
-            unless code_data
-              return error_response 400, "invalid_grant", err
-            if code_data.exp and code_data.exp < os.time!
-              return error_response 400, "invalid_grant", "code expired"
-            unless code_data.cid == client_id
-              return error_response 400, "invalid_grant", "client_id mismatch"
-            unless code_data.ru == args.redirect_uri
-              return error_response 400, "invalid_grant", "redirect_uri mismatch"
-            unless verify_pkce args.code_verifier, code_data.cc
-              return error_response 400, "invalid_grant", "PKCE verification failed"
-            issue_token!
-          when "client_credentials"
-            issue_token!
-          else
-            error_response 400, "unsupported_grant_type"
+        {
+          json: token
+          headers: merge cors_headers, {
+            ["Cache-Control"]: "no-store"
+          }
+        }
     }
 
   routes: =>

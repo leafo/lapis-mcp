@@ -1,125 +1,13 @@
 local json = require("cjson.safe")
 local respond_to
 respond_to = require("lapis.application").respond_to
-local encode_base64, encode_with_secret, decode_with_secret, decode_base64
+local verify_bearer, is_s256_challenge, redirect_uri_allowed, redirect_to_client
 do
-  local _obj_0 = require("lapis.util.encoding")
-  encode_base64, encode_with_secret, decode_with_secret, decode_base64 = _obj_0.encode_base64, _obj_0.encode_with_secret, _obj_0.decode_with_secret, _obj_0.decode_base64
+  local _obj_0 = require("lapis.mcp.oauth.util")
+  verify_bearer, is_s256_challenge, redirect_uri_allowed, redirect_to_client = _obj_0.verify_bearer, _obj_0.is_s256_challenge, _obj_0.redirect_uri_allowed, _obj_0.redirect_to_client
 end
-local encode_query_string, unescape
-do
-  local _obj_0 = require("lapis.util")
-  encode_query_string, unescape = _obj_0.encode_query_string, _obj_0.unescape
-end
-local base64url_no_pad
-base64url_no_pad = function(s)
-  local encoded = encode_base64(s)
-  return (encoded:gsub("+", "-"):gsub("/", "_"):gsub("=", ""))
-end
-local secure_compare
-secure_compare = function(a, b)
-  if not (type(a) == "string" and type(b) == "string") then
-    return false
-  end
-  if not (#a == #b) then
-    return false
-  end
-  local diff = 0
-  for i = 1, #a do
-    if not (a:byte(i) == b:byte(i)) then
-      diff = diff + 1
-    end
-  end
-  return diff == 0
-end
-local parse_authorization
-parse_authorization = function(header)
-  if not (type(header) == "string") then
-    return nil
-  end
-  local scheme, value = header:match("^(%S+)%s+(.+)$")
-  if not (scheme) then
-    return nil
-  end
-  return scheme:lower(), value
-end
-local verify_bearer
-verify_bearer = function(header, expected)
-  if not (expected) then
-    return false
-  end
-  local scheme, token = parse_authorization(header)
-  if not (scheme == "bearer") then
-    return false
-  end
-  return secure_compare(token, expected)
-end
-local verify_pkce
-verify_pkce = function(verifier, challenge)
-  if not (type(verifier) == "string" and type(challenge) == "string") then
-    return false
-  end
-  local digest = require("openssl.digest")
-  local h = digest.new("sha256")
-  h:update(verifier)
-  return secure_compare(base64url_no_pad(h:final()), challenge)
-end
-local is_s256_challenge
-is_s256_challenge = function(challenge)
-  return type(challenge) == "string" and #challenge == 43 and challenge:match("^[%w%-_]+$") ~= nil
-end
-local LOOPBACK_HOSTS = {
-  ["localhost"] = true,
-  ["127.0.0.1"] = true,
-  ["[::1]"] = true
-}
-local parse_redirect_uri
-parse_redirect_uri = function(uri)
-  local scheme, host, port, rest = uri:match("^(%a[%w+.-]*)://(%[[^%]]+%]):?(%d*)(.*)$")
-  if not (scheme) then
-    scheme, host, port, rest = uri:match("^(%a[%w+.-]*)://([^/:?#%[]+):?(%d*)(.*)$")
-  end
-  if not (scheme) then
-    return nil
-  end
-  return scheme:lower(), host:lower(), port, rest
-end
-local redirect_uri_allowed
-redirect_uri_allowed = function(uri, allowed_uris)
-  if not (type(uri) == "string") then
-    return false
-  end
-  for _index_0 = 1, #allowed_uris do
-    local allowed = allowed_uris[_index_0]
-    if uri == allowed then
-      return true
-    end
-  end
-  local scheme, host, _, rest = parse_redirect_uri(uri)
-  if not (scheme == "http" and LOOPBACK_HOSTS[host]) then
-    return false
-  end
-  for _index_0 = 1, #allowed_uris do
-    local allowed = allowed_uris[_index_0]
-    local a_scheme, a_host, a_rest
-    a_scheme, a_host, _, a_rest = parse_redirect_uri(allowed)
-    if scheme == a_scheme and host == a_host and rest == a_rest then
-      return true
-    end
-  end
-  return false
-end
-local redirect_to_client
-redirect_to_client = function(redirect_uri, params)
-  local sep = redirect_uri:find("?", 1, true) and "&" or "?"
-  return {
-    redirect_to = redirect_uri .. sep .. encode_query_string(params)
-  }
-end
-local decode_basic_part
-decode_basic_part = function(part)
-  return unescape(part:gsub("%+", " "))
-end
+local StaticMode
+StaticMode = require("lapis.mcp.oauth.static").StaticMode
 local OauthConfig
 do
   local _class_0
@@ -160,7 +48,7 @@ do
       return tostring(base) .. tostring(segment)
     end,
     verify_bearer_token = function(self, header)
-      return verify_bearer(header, self.opts.access_token or self.opts.client_secret)
+      return self.mode:verify_bearer_token(header)
     end,
     protected_resource_handler = function(self)
       local config = self
@@ -187,27 +75,23 @@ do
       local config = self
       return function(route)
         local issuer = config:issuer_url(route.req)
+        local metadata = {
+          issuer = issuer,
+          authorization_endpoint = tostring(issuer) .. "/oauth/authorize",
+          token_endpoint = tostring(issuer) .. "/oauth/token",
+          response_types_supported = setmetatable({
+            "code"
+          }, json.array_mt),
+          code_challenge_methods_supported = setmetatable({
+            "S256"
+          }, json.array_mt),
+          authorization_response_iss_parameter_supported = true
+        }
+        for k, v in pairs(config.mode:server_metadata()) do
+          metadata[k] = v
+        end
         return {
-          json = {
-            issuer = issuer,
-            authorization_endpoint = tostring(issuer) .. "/oauth/authorize",
-            token_endpoint = tostring(issuer) .. "/oauth/token",
-            response_types_supported = setmetatable({
-              "code"
-            }, json.array_mt),
-            grant_types_supported = setmetatable({
-              "authorization_code",
-              "client_credentials"
-            }, json.array_mt),
-            code_challenge_methods_supported = setmetatable({
-              "S256"
-            }, json.array_mt),
-            token_endpoint_auth_methods_supported = setmetatable({
-              "client_secret_post",
-              "client_secret_basic"
-            }, json.array_mt),
-            authorization_response_iss_parameter_supported = true
-          },
+          json = metadata,
           headers = {
             ["Cache-Control"] = "public, max-age=3600",
             ["Access-Control-Allow-Origin"] = "*"
@@ -226,13 +110,11 @@ do
           local state = params.state
           local code_challenge = params.code_challenge
           local code_challenge_method = params.code_challenge_method or "plain"
-          if not (client_id == config.opts.client_id) then
-            return {
-              status = 400,
-              json = {
-                error = "invalid_client"
-              }
-            }
+          do
+            local err_response = config.mode:check_client(client_id)
+            if err_response then
+              return err_response
+            end
           end
           if not (type(redirect_uri) == "string") then
             return {
@@ -285,15 +167,11 @@ do
           if not (is_s256_challenge(code_challenge)) then
             return redirect_error("invalid_request", "code_challenge is not a valid S256 challenge")
           end
-          local code = encode_with_secret({
-            cid = client_id,
-            ru = redirect_uri,
-            cc = code_challenge,
-            exp = os.time() + 600
-          }, config.opts.client_secret)
-          return redirect_to_client(redirect_uri, {
-            code = code,
+          return config.mode:authorize(route, {
+            client_id = client_id,
+            redirect_uri = redirect_uri,
             state = state,
+            code_challenge = code_challenge,
             iss = iss
           })
         end
@@ -320,19 +198,6 @@ do
           out[k] = v
         end
         return out
-      end
-      local issue_token
-      issue_token = function()
-        return {
-          json = {
-            access_token = config.opts.access_token or config.opts.client_secret,
-            token_type = "Bearer",
-            expires_in = config.opts.access_token_ttl or 3600
-          },
-          headers = merge(cors_headers, {
-            ["Cache-Control"] = "no-store"
-          })
-        }
       end
       local error_response
       error_response = function(status, code, description)
@@ -364,50 +229,16 @@ do
           }
         end,
         POST = function(route)
-          local args = route.params
-          local auth_header = route.req.headers["authorization"]
-          local client_id = args.client_id
-          local client_secret = args.client_secret
-          local scheme, basic_creds = parse_authorization(auth_header)
-          if scheme == "basic" then
-            local decoded = decode_base64(basic_creds)
-            if decoded then
-              local cid, csec = decoded:match("^([^:]*):(.*)$")
-              if cid then
-                client_id = decode_basic_part(cid)
-              end
-              if csec then
-                client_secret = decode_basic_part(csec)
-              end
-            end
+          local token, status, code, description = config.mode:token_request(route)
+          if not (token) then
+            return error_response(status, code, description)
           end
-          if not (client_id == config.opts.client_id and secure_compare(client_secret, config.opts.client_secret)) then
-            return error_response(401, "invalid_client")
-          end
-          local _exp_0 = args.grant_type
-          if "authorization_code" == _exp_0 then
-            local code_data, err = decode_with_secret(args.code or "", config.opts.client_secret)
-            if not (code_data) then
-              return error_response(400, "invalid_grant", err)
-            end
-            if code_data.exp and code_data.exp < os.time() then
-              return error_response(400, "invalid_grant", "code expired")
-            end
-            if not (code_data.cid == client_id) then
-              return error_response(400, "invalid_grant", "client_id mismatch")
-            end
-            if not (code_data.ru == args.redirect_uri) then
-              return error_response(400, "invalid_grant", "redirect_uri mismatch")
-            end
-            if not (verify_pkce(args.code_verifier, code_data.cc)) then
-              return error_response(400, "invalid_grant", "PKCE verification failed")
-            end
-            return issue_token()
-          elseif "client_credentials" == _exp_0 then
-            return issue_token()
-          else
-            return error_response(400, "unsupported_grant_type")
-          end
+          return {
+            json = token,
+            headers = merge(cors_headers, {
+              ["Cache-Control"] = "no-store"
+            })
+          }
         end
       })
     end,
@@ -452,8 +283,7 @@ do
         mount_path = "/"
       end
       self.opts, self.mount_path = opts, mount_path
-      assert(self.opts.client_id, "oauth.client_id is required")
-      assert(self.opts.client_secret, "oauth.client_secret is required")
+      self.mode = StaticMode(self.opts)
       do
         local uris = self.opts.allowed_redirect_uris
         if uris then
