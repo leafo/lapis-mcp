@@ -511,6 +511,69 @@ describe "mcp_handler", ->
       result = json.decode body
       assert.equal 0, #result.result.tools
 
+  describe "server.auth", ->
+    ping = (opts, headers={}) ->
+      captured = {}
+      opts.load_session = (req, server) ->
+        captured.called = true
+        captured.auth = server.auth
+
+      headers["Accept"] = "application/json, text/event-stream"
+      status = simulate_request build_app(opts), "/mcp", {
+        method: "POST"
+        :headers
+        body: json.encode {jsonrpc: "2.0", id: 1, method: "ping"}
+      }
+
+      status, captured
+
+    it "is nil on a mount without auth", ->
+      status, captured = ping {}
+      assert.equal 200, status
+      assert.is_true captured.called
+      assert.is_nil captured.auth
+
+    it "is static for a bearer_token mount", ->
+      status, captured = ping { bearer_token: "shared-secret" }, {
+        "Authorization": "Bearer shared-secret"
+      }
+      assert.equal 200, status
+      assert.same {static: true}, captured.auth
+
+    it "is static for an oauth mount with the service token", ->
+      status, captured = ping {
+        oauth: {
+          client_id: "connector-client"
+          client_secret: "connector-secret"
+        }
+      }, {
+        "Authorization": "Bearer connector-secret"
+      }
+      assert.equal 200, status
+      assert.same {static: true}, captured.auth
+
+    it "doesn't run load_session for CORS preflight", ->
+      called = false
+      app = build_app {
+        allowed_origins: "*"
+        oauth: {
+          client_id: "connector-client"
+          client_secret: "connector-secret"
+        }
+        load_session: (req, server) ->
+          called = true
+      }
+
+      status = simulate_request app, "/mcp", {
+        method: "OPTIONS"
+        headers: {
+          "Origin": "https://example.com"
+        }
+      }
+
+      assert.equal 204, status
+      assert.is_false called
+
   describe "oauth", ->
     it "uses public base URL in bearer challenge metadata URL", ->
       app = build_app {
@@ -801,3 +864,46 @@ describe "McpHttpRouter", ->
     assert.equal 200, status
     result = json.decode body
     assert.equal "hello", result.result.tools[1].name
+
+  describe "application", ->
+    it "returns an application that can be included into another app", ->
+      router = McpHttpRouter!
+      router\mount "/mcp", TestServer, {
+        oauth: {
+          client_id: "connector-client"
+          client_secret: "connector-secret"
+        }
+      }
+
+      McpApp = router\application!
+
+      before_filter_ran = false
+
+      class ParentApp extends lapis.Application
+        layout: false
+
+        @before_filter =>
+          before_filter_ran = true
+
+        @include McpApp
+
+      status, body = simulate_request ParentApp, "/mcp", {
+        method: "POST"
+        headers: {
+          "Accept": "application/json, text/event-stream"
+          "Authorization": "Bearer connector-secret"
+        }
+        body: json.encode {
+          jsonrpc: "2.0"
+          id: 1
+          method: "tools/call"
+          params: { name: "hello", arguments: {} }
+        }
+      }
+
+      assert.equal 200, status
+      assert.equal "world", (json.decode body).result.content[1].text
+      assert.is_true before_filter_ran
+
+      status = simulate_request ParentApp, "/.well-known/oauth-authorization-server/mcp"
+      assert.equal 200, status

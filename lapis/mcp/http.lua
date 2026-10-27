@@ -164,39 +164,46 @@ mcp_handler = function(ServerClass, opts)
         end
         self.cors_headers = build_cors_headers(origin, allowed_origin)
       end
-      if self.req.cmd_mth ~= "OPTIONS" then
-        if oauth then
-          if not (oauth_config:verify_bearer_token(self.req.headers["authorization"])) then
-            local metadata_url = oauth_config:protected_resource_metadata_url(self.req)
-            self:write({
-              json = {
-                error = "unauthorized"
-              },
-              status = 401,
-              headers = merge_headers(self.cors_headers, {
-                ["WWW-Authenticate"] = "Bearer realm=\"mcp\", resource_metadata=\"" .. tostring(metadata_url) .. "\""
-              })
+      if self.req.cmd_mth == "OPTIONS" then
+        return 
+      end
+      local auth = nil
+      if oauth then
+        auth = oauth_config:verify_bearer_token(self.req.headers["authorization"])
+        if not (auth) then
+          local metadata_url = oauth_config:protected_resource_metadata_url(self.req)
+          self:write({
+            json = {
+              error = "unauthorized"
+            },
+            status = 401,
+            headers = merge_headers(self.cors_headers, {
+              ["WWW-Authenticate"] = "Bearer realm=\"mcp\", resource_metadata=\"" .. tostring(metadata_url) .. "\""
             })
-            return 
-          end
-        elseif bearer_token then
-          if not (verify_bearer(self.req.headers["authorization"], bearer_token)) then
-            self:write({
-              json = {
-                error = "unauthorized"
-              },
-              status = 401,
-              headers = merge_headers(self.cors_headers, {
-                ["WWW-Authenticate"] = "Bearer realm=\"mcp\""
-              })
-            })
-            return 
-          end
+          })
+          return 
         end
+      elseif bearer_token then
+        if not (verify_bearer(self.req.headers["authorization"], bearer_token)) then
+          self:write({
+            json = {
+              error = "unauthorized"
+            },
+            status = 401,
+            headers = merge_headers(self.cors_headers, {
+              ["WWW-Authenticate"] = "Bearer realm=\"mcp\""
+            })
+          })
+          return 
+        end
+        auth = {
+          static = true
+        }
       end
       local server = ServerClass(opts.server_options or { })
       server:skip_initialize()
       server.transport = HttpNoopTransport()
+      server.auth = auth
       server.server_capabilities = without_notifications(server.server_capabilities)
       if opts.load_session then
         opts.load_session(self, server)
@@ -365,6 +372,48 @@ do
         app:match(mount.path, mcp_handler(mount.ServerClass, mount.opts))
       end
       return app
+    end,
+    application = function(self)
+      local lapis = require("lapis")
+      local McpApplication
+      do
+        local _class_1
+        local _parent_0 = lapis.Application
+        local _base_1 = { }
+        _base_1.__index = _base_1
+        setmetatable(_base_1, _parent_0.__base)
+        _class_1 = setmetatable({
+          __init = function(self, ...)
+            return _class_1.__parent.__init(self, ...)
+          end,
+          __base = _base_1,
+          __name = "McpApplication",
+          __parent = _parent_0
+        }, {
+          __index = function(cls, name)
+            local val = rawget(_base_1, name)
+            if val == nil then
+              local parent = rawget(cls, "__parent")
+              if parent then
+                return parent[name]
+              end
+            else
+              return val
+            end
+          end,
+          __call = function(cls, ...)
+            local _self_0 = setmetatable({}, _base_1)
+            cls.__init(_self_0, ...)
+            return _self_0
+          end
+        })
+        _base_1.__class = _class_1
+        if _parent_0.__inherited then
+          _parent_0.__inherited(_parent_0, _class_1)
+        end
+        McpApplication = _class_1
+      end
+      return self:install(McpApplication)
     end
   }
   _base_0.__index = _base_0

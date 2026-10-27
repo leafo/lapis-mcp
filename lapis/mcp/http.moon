@@ -101,33 +101,42 @@ mcp_handler = (ServerClass, opts={}) ->
           return
         @cors_headers = build_cors_headers origin, allowed_origin
 
-      if @req.cmd_mth != "OPTIONS"
-        if oauth
-          unless oauth_config\verify_bearer_token @req.headers["authorization"]
-            metadata_url = oauth_config\protected_resource_metadata_url @req
-            @write {
-              json: {error: "unauthorized"}
-              status: 401
-              headers: merge_headers @cors_headers, {
-                ["WWW-Authenticate"]: "Bearer realm=\"mcp\", resource_metadata=\"#{metadata_url}\""
-              }
+      -- CORS preflight is unauthenticated and only needs the headers, so no
+      -- server is created and load_session doesn't run
+      return if @req.cmd_mth == "OPTIONS"
+
+      -- describes how the request was authorized, set as server.auth
+      auth = nil
+
+      if oauth
+        auth = oauth_config\verify_bearer_token @req.headers["authorization"]
+        unless auth
+          metadata_url = oauth_config\protected_resource_metadata_url @req
+          @write {
+            json: {error: "unauthorized"}
+            status: 401
+            headers: merge_headers @cors_headers, {
+              ["WWW-Authenticate"]: "Bearer realm=\"mcp\", resource_metadata=\"#{metadata_url}\""
             }
-            return
-        elseif bearer_token
-          unless verify_bearer @req.headers["authorization"], bearer_token
-            @write {
-              json: {error: "unauthorized"}
-              status: 401
-              headers: merge_headers @cors_headers, {
-                ["WWW-Authenticate"]: "Bearer realm=\"mcp\""
-              }
+          }
+          return
+      elseif bearer_token
+        unless verify_bearer @req.headers["authorization"], bearer_token
+          @write {
+            json: {error: "unauthorized"}
+            status: 401
+            headers: merge_headers @cors_headers, {
+              ["WWW-Authenticate"]: "Bearer realm=\"mcp\""
             }
-            return
+          }
+          return
+        auth = {static: true}
 
       -- Create fresh server instance for this request
       server = ServerClass opts.server_options or {}
       server\skip_initialize!
       server.transport = HttpNoopTransport!
+      server.auth = auth
       server.server_capabilities = without_notifications server.server_capabilities
 
       if opts.load_session
@@ -261,6 +270,13 @@ class McpHttpRouter
       app\match mount.path, mcp_handler mount.ServerClass, mount.opts
 
     app
+
+  -- returns a new lapis.Application subclass with the routes installed, for
+  -- including into an existing app with @include
+  application: =>
+    lapis = require "lapis"
+    class McpApplication extends lapis.Application
+    @install McpApplication
 
 serve = (server_module, opts={}) ->
   lapis = require "lapis"

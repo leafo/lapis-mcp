@@ -98,7 +98,8 @@ class StaticMode
       expires_in: @opts.access_token_ttl or 3600
     }
 
+  -- returns the auth table set as server.auth, or false
   verify_bearer_token: (header) =>
-    verify_bearer header, @access_token!
+    verify_bearer(header, @access_token!) and {static: true}
 
 { :StaticMode }

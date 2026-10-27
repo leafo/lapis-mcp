@@ -756,7 +756,7 @@ options:
 
 - `allowed_origins` - Either `"*"` or an array of allowed origins. If an `Origin` header is present and not allowed, the handler returns `403`.
 - `server_options` - Passed to `ServerClass(...)` each time a request creates a new server instance.
-- `load_session(req, server)` - Optional callback invoked after the server instance is created. Use this to restore per-session state, customize visibility, or apply authentication-derived state to the server.
+- `load_session(req, server)` - Optional callback invoked after the server instance is created, on every request except CORS preflight. Use this to restore per-session state, customize visibility, or apply authentication-derived state to the server. `server.auth` is already set when it runs (see below).
 - `create_session_id(req, server)` - Optional callback invoked for `initialize` requests. If it returns a value, it is written to the `Mcp-Session-Id` response header.
 - `bearer_token` - Optional static bearer token required on MCP endpoint requests; see [Authenticating with a Static Bearer Token](#authenticating-with-a-static-bearer-token).
 - `oauth` - Optional table that turns on the OAuth shim for this mount; see [Authenticating with OAuth](#authenticating-with-oauth-service-tokens).
@@ -766,6 +766,11 @@ to the surrounding Lapis application and these callbacks. For example, you can
 perform your own auth checks before the route runs, then use `load_session` to
 restore the server state associated with the current request.
 `bearer_token` and `oauth` are mutually exclusive.
+
+Each server instance's `server.auth` describes how the request was
+authorized, so `load_session` and tool handlers can tell. It is `nil` on a
+mount without `bearer_token` or `oauth`, and `{static = true}` when the request
+presented the static bearer token or the OAuth shim's service token.
 
 #### Multiple HTTP MCP Apps
 
@@ -804,6 +809,29 @@ OAuth routes are always scoped by mount path:
 
 The router raises an error during `install` if two MCP mounts or generated
 OAuth routes would collide.
+
+To keep the MCP routes in their own sub-application, `router\application!`
+returns a new `lapis.Application` subclass with the routes installed, ready
+for `@include`. The including app's `before_filter`s run on the MCP and OAuth
+routes, like any other included routes. Don't include it with a `path`
+prefix: the OAuth metadata URLs are built from the mount path, and the
+`.well-known` routes must stay at the site root. Put any prefix in the mount
+path instead.
+
+```moonscript
+-- applications/mcp.moon
+import McpHttpRouter from require "lapis.mcp.http"
+
+McpHttpRouter!\mount("/mcp", "my.mcp.server", {
+  -- ...
+})\application!
+```
+
+```moonscript
+-- app.moon
+class App extends lapis.Application
+  @include "applications.mcp"
+```
 
 #### HTTP serve
 

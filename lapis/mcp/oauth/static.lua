@@ -110,7 +110,9 @@ do
       }
     end,
     verify_bearer_token = function(self, header)
-      return verify_bearer(header, self:access_token())
+      return verify_bearer(header, self:access_token()) and {
+        static = true
+      }
     end
   }
   _base_0.__index = _base_0
