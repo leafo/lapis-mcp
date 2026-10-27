@@ -10,6 +10,12 @@ local DEFAULT_TTL = 60 * 60
 local MIN_TTL = 5 * 60
 local MAX_TTL = 24 * 60 * 60
 local CACHE_PREFIX = "lapis-mcp:client-metadata:"
+local PRIVATE_SUFFIXES = {
+  "localhost",
+  "local",
+  "internal",
+  "home.arpa"
+}
 local parse_client_id
 parse_client_id = function(client_id)
   if not (type(client_id) == "string") then
@@ -31,6 +37,19 @@ parse_client_id = function(client_id)
   if path == "/" then
     return nil, "client_id must have a path"
   end
+  host = host:lower()
+  if not (host:match("^[%w.-]+$") and not host:find("..", 1, true) and not host:match("^%.") and not host:match("%.$")) then
+    return nil, "client_id must have a valid hostname"
+  end
+  if not (host:match("%.%a[%w-]*$")) then
+    return nil, "client_id must use a public hostname"
+  end
+  for _index_0 = 1, #PRIVATE_SUFFIXES do
+    local suffix = PRIVATE_SUFFIXES[_index_0]
+    if host == suffix or host:sub(-#suffix - 1) == "." .. tostring(suffix) then
+      return nil, "client_id must use a public hostname"
+    end
+  end
   if not (path:match("^[%w%-._~!$&'()*+,;=:@/%%]*$")) then
     return nil, "client_id must be a valid URL path"
   end
@@ -43,7 +62,7 @@ parse_client_id = function(client_id)
       return nil, "client_id must not contain dot segments"
     end
   end
-  return host:lower()
+  return host
 end
 local origin
 origin = function(uri)
@@ -184,7 +203,7 @@ do
         log_rejection(client_id, "invalid_client_id", description)
         return nil, "invalid_client_id", description
       end
-      if not (self.trusted_hosts[host]) then
+      if not (self.allow_any_host or self.trusted_hosts[host]) then
         description = tostring(host) .. " is not a trusted client host"
         log_rejection(client_id, "untrusted_host", description)
         return nil, "untrusted_host", description
@@ -199,8 +218,12 @@ do
       do
         local cached = self:cache_get(client_id)
         if cached then
-          if cached.client then
-            return cached.client
+          do
+            local client = cached.client
+            if client then
+              client.trusted = self.trusted_hosts[host] == true
+              return client
+            end
           end
           return nil, cached.error, cached.description
         end
@@ -211,6 +234,7 @@ do
         self:cache_set(client_id, {
           client = client
         }, ttl)
+        client.trusted = self.trusted_hosts[host] == true
         return client
       end
       log_rejection(client_id, err, description)
@@ -287,12 +311,15 @@ do
       if opts == nil then
         opts = { }
       end
-      local hosts = opts.trusted_hosts
-      assert(type(hosts) == "table" and #hosts > 0, "trusted_hosts must be a non-empty array of hostnames")
+      self.allow_any_host = opts.allow_any_host == true
+      local hosts = opts.trusted_hosts or { }
+      if not (self.allow_any_host) then
+        assert(type(hosts) == "table" and #hosts > 0, "trusted_hosts must be a non-empty array of hostnames unless allow_any_host is set")
+      end
       self.trusted_hosts = { }
       for _index_0 = 1, #hosts do
         local host = hosts[_index_0]
-        assert(type(host) == "string", "trusted_hosts must be a non-empty array of hostnames")
+        assert(type(host) == "string", "trusted_hosts must be an array of hostnames")
         self.trusted_hosts[host:lower()] = true
       end
       self.cache = opts.cache

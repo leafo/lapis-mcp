@@ -207,11 +207,27 @@ describe "oauth site mode", ->
       assert.same CLIENT_ID, consent.client_id
       assert.same "Claude Code", consent.client_name
       assert.same "claude.ai", consent.client_host
+      assert.same true, consent.client_trusted
       assert.same REDIRECT_URI, consent.redirect_uri
       assert.same "localhost", consent.redirect_host
       assert.same true, consent.redirect_loopback
       assert.same "https://example.com/mcp/oauth/authorize", consent.action
       assert.is_string consent.consent_token
+
+    it "shows the consent page for an untrusted client with allow_any_client", ->
+      app, _, http = build_app oauth: { allow_any_client: true }
+      other_id = "https://client.example/client.json"
+      http.responses[other_id] = {
+        body: {
+          client_id: other_id
+          client_name: "Example Client"
+          redirect_uris: {"http://localhost/callback"}
+        }
+      }
+
+      consent = show_consent app, client_id: other_id
+      assert.same "client.example", consent.client_host
+      assert.same false, consent.client_trusted
 
     it "rejects a redirect_uri the client doesn't list, without redirecting", ->
       app = build_app!

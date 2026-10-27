@@ -110,6 +110,20 @@ describe "client metadata", ->
       "https://client.example/a/%2E/client.json"
       "https://client.example/a%zz.json"
       "https://client.example/a.json%"
+      "https://127.0.0.1/client.json"
+      "https://10.0.0.1/client.json"
+      "https://2130706433/client.json"
+      "https://0x7f.1/client.json"
+      "https://localhost/client.json"
+      "https://app.localhost/client.json"
+      "https://printer.local/client.json"
+      "https://db.internal/client.json"
+      "https://router.home.arpa/client.json"
+      "https://[::1]/client.json"
+      "https://claude.ai./client.json"
+      "https://.claude.ai/client.json"
+      "https://claude..ai/client.json"
+      "https://under_score.example/client.json"
     }
       it "rejects #{bad}", ->
         assert.falsy (parse_client_id bad)
@@ -135,6 +149,7 @@ describe "client metadata", ->
         client_name: "Claude Code"
         host: "claude.ai"
         redirect_uris: {"http://localhost/callback", "http://127.0.0.1/callback"}
+        trusted: true
       }, resolver\resolve CLAUDE_CODE_ID
 
       assert.same 1, #http.requests
@@ -147,6 +162,44 @@ describe "client metadata", ->
       assert.falsy client
       assert.same "invalid_client_id", err
       assert.same 0, #http.requests
+
+    describe "allow_any_host", ->
+      build_open = (responses, opts={}) ->
+        http = StubHttp responses
+        resolver = ClientMetadata {
+          trusted_hosts: opts.trusted_hosts
+          allow_any_host: true
+          cache: opts.cache
+          :http
+        }
+        resolver, http
+
+      it "doesn't need trusted_hosts", ->
+        assert.truthy ClientMetadata allow_any_host: true
+
+      it "accepts an untrusted host and marks it", ->
+        resolver = build_open {
+          ["https://client.example/client.json"]: { body: doc_with {} }
+        }
+        client = resolver\resolve "https://client.example/client.json"
+        assert.truthy client
+        assert.false client.trusted
+
+      it "marks a trusted host, also from the cache", ->
+        cache = StubCache!
+        resolver, http = build_open {
+          ["https://client.example/client.json"]: { body: doc_with {} }
+        }, trusted_hosts: {"client.example"}, :cache
+
+        assert.true resolver\resolve("https://client.example/client.json").trusted
+        assert.true resolver\resolve("https://client.example/client.json").trusted
+        assert.same 1, #http.requests
+
+      it "still refuses private hosts", ->
+        resolver, http = build_open {}
+        _, err = resolver\resolve "https://10.0.0.1/client.json"
+        assert.same "invalid_client_id", err
+        assert.same 0, #http.requests
 
     it "rejects an untrusted host without fetching", ->
       resolver, http = build {}

@@ -129,6 +129,7 @@ do
         client_id = request.client_id,
         client_name = client.client_name,
         client_host = client.host,
+        client_trusted = client.trusted,
         redirect_uri = request.redirect_uri,
         redirect_host = redirect_host,
         redirect_loopback = is_loopback_uri(request.redirect_uri),
@@ -289,6 +290,7 @@ do
       self.access_token_ttl = self.opts.access_token_ttl or DEFAULT_ACCESS_TOKEN_TTL
       self.clients = ClientMetadata({
         trusted_hosts = self.opts.trusted_client_hosts,
+        allow_any_host = self.opts.allow_any_client,
         cache = self.opts.cache,
         http = self.opts.http
       })

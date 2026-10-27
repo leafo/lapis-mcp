@@ -2,17 +2,21 @@
 -- document served there lists the client's name and redirect URIs.
 -- https://datatracker.ietf.org/doc/draft-ietf-oauth-client-id-metadata-document/
 --
--- Only clients on trusted_hosts are accepted. Anyone can publish a metadata
--- document, so without that list any website could ask users to connect.
+-- Only clients on trusted_hosts are accepted, unless allow_any_host is set.
+-- Anyone can publish a metadata document, so with allow_any_host any website
+-- can ask users to connect, and the consent page is what stops a user
+-- approving one they don't know.
 --
 --   resolver = ClientMetadata {
 --     trusted_hosts: {"claude.ai"}
+--     allow_any_host: true -- optional
 --     cache: ngx.shared.mcp_clients -- optional, anything with get and set
 --   }
 --
 --   client, err, description = resolver\resolve client_id
 --
--- client is {:client_id, :client_name, :host, :redirect_uris}. err is one of
+-- client is {:client_id, :client_name, :host, :redirect_uris, :trusted},
+-- trusted is whether host is in trusted_hosts. err is one of
 -- "invalid_client_id", "untrusted_host", "fetch_failed" or
 -- "invalid_document", with a description for logging or an error page.
 --
@@ -27,7 +31,10 @@
 --
 --   * Trusting a host only means something if its certificate is checked,
 --     and nginx doesn't by default. Set proxy_ssl_verify on,
---     proxy_ssl_trusted_certificate and proxy_ssl_server_name on.
+--     proxy_ssl_trusted_certificate and proxy_ssl_server_name on. With
+--     allow_any_host this also keeps a public hostname that resolves to a
+--     private address from getting a response, as nothing there has a valid
+--     certificate for it.
 --   * Timeouts come from proxy_connect_timeout and proxy_read_timeout.
 --   * The response is buffered whole before lapis-mcp sees it, so the 16KB
 --     limit stops an oversized document being used but not being read.
@@ -47,6 +54,10 @@ MAX_TTL = 24 * 60 * 60
 
 CACHE_PREFIX = "lapis-mcp:client-metadata:"
 
+-- the server fetches the client_id, so names that point at it or its own
+-- network are refused
+PRIVATE_SUFFIXES = {"localhost", "local", "internal", "home.arpa"}
+
 -- returns the host of a valid client_id URL, or nil and the reason
 parse_client_id = (client_id) ->
   return nil, "client_id must be a string" unless type(client_id) == "string"
@@ -59,6 +70,19 @@ parse_client_id = (client_id) ->
   return nil, "client_id must not contain a username or password" if host\find "@", 1, true
   return nil, "client_id must not contain a port" if host\find ":", 1, true
   return nil, "client_id must have a path" if path == "/"
+
+  host = host\lower!
+  unless host\match("^[%w.-]+$") and not host\find("..", 1, true) and not host\match("^%.") and not host\match "%.$"
+    return nil, "client_id must have a valid hostname"
+
+  -- a top level domain starts with a letter, which rules out IP addresses
+  -- and numeric hosts
+  unless host\match "%.%a[%w-]*$"
+    return nil, "client_id must use a public hostname"
+
+  for suffix in *PRIVATE_SUFFIXES
+    if host == suffix or host\sub(-#suffix - 1) == ".#{suffix}"
+      return nil, "client_id must use a public hostname"
 
   -- RFC 3986 path characters only, which rules out whitespace and control
   -- characters reaching the request line
@@ -74,7 +98,7 @@ parse_client_id = (client_id) ->
     if segment == "." or segment == ".."
       return nil, "client_id must not contain dot segments"
 
-  host\lower!
+  host
 
 origin = (uri) ->
   scheme, host, port = parse_uri uri
@@ -155,12 +179,15 @@ log_rejection = (client_id, err, description) ->
 
 class ClientMetadata
   new: (opts={}) =>
-    hosts = opts.trusted_hosts
-    assert type(hosts) == "table" and #hosts > 0, "trusted_hosts must be a non-empty array of hostnames"
+    @allow_any_host = opts.allow_any_host == true
+
+    hosts = opts.trusted_hosts or {}
+    unless @allow_any_host
+      assert type(hosts) == "table" and #hosts > 0, "trusted_hosts must be a non-empty array of hostnames unless allow_any_host is set"
 
     @trusted_hosts = {}
     for host in *hosts
-      assert type(host) == "string", "trusted_hosts must be a non-empty array of hostnames"
+      assert type(host) == "string", "trusted_hosts must be an array of hostnames"
       @trusted_hosts[host\lower!] = true
 
     @cache = opts.cache
@@ -172,7 +199,7 @@ class ClientMetadata
       log_rejection client_id, "invalid_client_id", description
       return nil, "invalid_client_id", description
 
-    unless @trusted_hosts[host]
+    unless @allow_any_host or @trusted_hosts[host]
       description = "#{host} is not a trusted client host"
       log_rejection client_id, "untrusted_host", description
       return nil, "untrusted_host", description
@@ -184,12 +211,15 @@ class ClientMetadata
     return nil, err, description unless host
 
     if cached = @cache_get client_id
-      return cached.client if cached.client
+      if client = cached.client
+        client.trusted = @trusted_hosts[host] == true
+        return client
       return nil, cached.error, cached.description
 
     client, err, description, ttl = @fetch client_id, host
     if client
       @cache_set client_id, {:client}, ttl
+      client.trusted = @trusted_hosts[host] == true
       return client
 
     log_rejection client_id, err, description

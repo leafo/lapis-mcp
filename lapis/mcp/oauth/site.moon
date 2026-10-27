@@ -6,6 +6,7 @@
 --   oauth: {
 --     grants: McpGrants
 --     trusted_client_hosts: {"claude.ai"}
+--     allow_any_client: true -- optional, see below
 --     current_user: (route) -> route.current_user
 --     login_url: (route, return_to) -> route\url_for "login", nil, :return_to
 --     render_consent: (route, consent) ->
@@ -17,9 +18,14 @@
 -- render_consent shows what's asking for access and a form that posts
 -- consent.consent_token to consent.action, with approve set to approve and
 -- without it to deny. The consent fields are client_id, client_name,
--- client_host, redirect_uri, redirect_host and redirect_loopback. Name the
--- client by client_host, client_name is chosen by the client. Headers that
--- stop the page being framed or cached are added to its response.
+-- client_host, client_trusted, redirect_uri, redirect_host and
+-- redirect_loopback. Name the client by client_host, client_name is chosen
+-- by the client. Headers that stop the page being framed or cached are added
+-- to its response.
+--
+-- Only clients on trusted_client_hosts can connect unless allow_any_client
+-- is set. With it, any website can send your users to a consent page naming
+-- itself, so warn on the page when client_trusted is false.
 --
 -- The owner values are put in the consent token, so they must be plain
 -- strings, numbers or booleans.
@@ -77,6 +83,7 @@ class SiteMode
     @access_token_ttl = @opts.access_token_ttl or DEFAULT_ACCESS_TOKEN_TTL
     @clients = ClientMetadata {
       trusted_hosts: @opts.trusted_client_hosts
+      allow_any_host: @opts.allow_any_client
       cache: @opts.cache
       http: @opts.http
     }
@@ -146,6 +153,7 @@ class SiteMode
       client_id: request.client_id
       client_name: client.client_name
       client_host: client.host
+      client_trusted: client.trusted
       redirect_uri: request.redirect_uri
       :redirect_host
       redirect_loopback: is_loopback_uri request.redirect_uri

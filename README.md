@@ -1006,7 +1006,8 @@ Document](https://datatracker.ietf.org/doc/draft-ietf-oauth-client-id-metadata-d
 the `client_id` is an https URL serving the client's name and redirect URIs,
 so there's no client registration. Claude (claude.ai, Desktop, mobile and
 Claude Code) uses one hosted on `claude.ai`. Only clients on
-`trusted_client_hosts` can connect.
+`trusted_client_hosts` can connect, unless you set `allow_any_client` to let
+any client connect and leave it to the user on the consent page.
 
 The flow:
 
@@ -1068,6 +1069,10 @@ without it to deny:
   <strong><%= consent.client_host %></strong> (<%= consent.client_name %>)
   wants to access your account.
 </p>
+<% if not consent.client_trusted then %>
+  <p>We don't recognise this app. Only allow it if you trust
+  <%= consent.client_host %>.</p>
+<% end %>
 <% if consent.redirect_loopback then %>
   <p>You'll be sent back to an app running on your own computer.</p>
 <% else %>
@@ -1092,7 +1097,8 @@ numbers or booleans.
 ##### User Login Options
 
 - `grants` (required): the grant store, usually an `OauthGrantModel` subclass. Any object that passes the contract tests in `lapis.mcp.oauth.grant_store_contract` works.
-- `trusted_client_hosts` (required): hosts whose metadata documents are accepted, matched exactly. `{"claude.ai"}` for Claude.
+- `trusted_client_hosts` (required unless `allow_any_client` is set): hosts whose metadata documents are accepted, matched exactly. `{"claude.ai"}` for Claude.
+- `allow_any_client` (optional): accept a metadata document from any public host. Hosts not in `trusted_client_hosts` get `client_trusted = false` on the consent page, which should warn about them. Needs certificate checking on outgoing requests, see below.
 - `current_user(route)` (required): returns the logged in user, or `nil`. lapis-mcp only passes it to `owner_values`.
 - `login_url(route, return_to)` (required): the URL of your login page, which must redirect to `return_to` after login.
 - `render_consent(route, consent)` (required): renders the consent page, see above.
@@ -1105,7 +1111,9 @@ numbers or booleans.
 - Metadata documents are fetched with `lapis.http`, which under nginx goes
   through the `/proxy` location. Its TLS settings decide whether trusting a
   host means anything, so set `proxy_ssl_verify on`,
-  `proxy_ssl_trusted_certificate` and `proxy_ssl_server_name on` there.
+  `proxy_ssl_trusted_certificate` and `proxy_ssl_server_name on` there. With
+  `allow_any_client` this also stops a hostname that resolves to a private
+  address from getting anything back from your network.
 - Expired grants aren't deleted automatically. Call `McpGrants\delete_expired!`
   periodically, for example from a cron job.
 - Rejected clients are logged as warnings, with the reason. A client that
