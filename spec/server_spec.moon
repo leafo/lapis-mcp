@@ -1815,6 +1815,28 @@ describe "McpServer", ->
       assert.same {nil, "Unknown tool: write-tool"}, {server\execute_tool "write-tool"}
       assert.same "read", server\execute_tool "read-tool"
 
+  it "runs tools/call through execute_tool", ->
+    class OverrideServer extends McpServer
+      @add_tool {
+        name: "tool"
+        description: "Tool"
+        inputSchema: { type: "object", properties: {}, required: {} }
+      }, -> "ran"
+
+      execute_tool: (name, arguments) => nil, "denied"
+
+    server = OverrideServer!
+    server\skip_initialize!
+
+    response = server\handle_tools_call {
+      jsonrpc: "2.0"
+      id: 1
+      method: "tools/call"
+      params: { name: "tool", arguments: {} }
+    }
+    assert.true response.result.isError
+    assert.same "denied", response.result.content[1].text
+
   describe "set_visibility_by_tags", ->
     it "should hide tools that don't match provided tags", ->
       class TagServer extends McpServer

@@ -1126,8 +1126,10 @@ numbers or booleans.
   through the `/proxy` location. Its TLS settings decide whether trusting a
   host means anything, so set `proxy_ssl_verify on`,
   `proxy_ssl_trusted_certificate` and `proxy_ssl_server_name on` there. With
-  `allow_any_client` this also stops a hostname that resolves to a private
-  address from getting anything back from your network.
+  `allow_any_client` this also stops a hostname pointed at a private address
+  from getting anything back from your network, unless a service there has a
+  valid certificate for that name. If yours do, send the fetch through a proxy
+  that only allows public addresses.
 - Expired grants aren't deleted automatically. Call `McpGrants\delete_expired!`
   periodically, for example from a cron job.
 - Rejected clients are logged as warnings, with the reason. A client that

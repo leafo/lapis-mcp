@@ -624,7 +624,7 @@ class McpServer
 
     @debug_log "info", "Executing tool: #{tool_name}"
 
-    result, err = @invoke_tool tool, arguments or {}
+    result, err = @execute_tool tool_name, arguments or {}
 
     if err
       @debug_log "error", err

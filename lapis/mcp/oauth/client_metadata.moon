@@ -32,9 +32,10 @@
 --   * Trusting a host only means something if its certificate is checked,
 --     and nginx doesn't by default. Set proxy_ssl_verify on,
 --     proxy_ssl_trusted_certificate and proxy_ssl_server_name on. With
---     allow_any_host this also keeps a public hostname that resolves to a
---     private address from getting a response, as nothing there has a valid
---     certificate for it.
+--     allow_any_host this also keeps a hostname pointed at a private address
+--     from getting a response, unless something there has a valid
+--     certificate for that name. If your network has such services, send
+--     the fetch through a proxy that only allows public addresses.
 --   * Timeouts come from proxy_connect_timeout and proxy_read_timeout.
 --   * The response is buffered whole before lapis-mcp sees it, so the 16KB
 --     limit stops an oversized document being used but not being read.

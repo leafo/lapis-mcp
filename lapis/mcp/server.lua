@@ -539,7 +539,7 @@ do
         return error_response(message.id, -32602, "Invalid arguments: expected an object")
       end
       self:debug_log("info", "Executing tool: " .. tostring(tool_name))
-      local result, err = self:invoke_tool(tool, arguments or { })
+      local result, err = self:execute_tool(tool_name, arguments or { })
       if err then
         self:debug_log("error", err)
         return {
