@@ -96,7 +96,7 @@ authorize = (app, params={}, opts={user: 1}) ->
   for k, v in pairs params
     args[k] = v or nil
 
-  request app, "/mcp/oauth/authorize?#{encode_query_string args}", opts
+  request app, "#{opts.path or "/mcp"}/oauth/authorize?#{encode_query_string args}", opts
 
 -- shows the consent page, returns the consent and the response headers
 show_consent = (app, params, opts) ->
@@ -107,7 +107,7 @@ show_consent = (app, params, opts) ->
 submit_consent = (app, consent_token, opts={}) ->
   post = { consent_token: consent_token }
   post.approve = "1" if opts.approve != false
-  request app, "/mcp/oauth/authorize", {
+  request app, "#{opts.path or "/mcp"}/oauth/authorize", {
     method: "POST"
     :post
     prev: opts.prev
@@ -124,7 +124,7 @@ get_code = (app) ->
   assert.same 302, status
   redirect_params(res_headers).code
 
-exchange = (app, code, overrides={}) ->
+exchange = (app, code, overrides={}, path="/mcp") ->
   post = {
     grant_type: "authorization_code"
     :code
@@ -135,7 +135,7 @@ exchange = (app, code, overrides={}) ->
   for k, v in pairs overrides
     post[k] = v or nil
 
-  status, body = request app, "/mcp/oauth/token", method: "POST", :post
+  status, body = request app, "#{path}/oauth/token", method: "POST", :post
   status, json.decode body
 
 ping = (app, token, opts={}) ->
@@ -379,6 +379,27 @@ describe "oauth site mode", ->
       app = build_app!
       status = exchange app, get_code(app), resource: "#{RESOURCE}/"
       assert.same 200, status
+
+    it "rejects a code issued for another mount", ->
+      grants = MemoryGrants!
+      http = StubHttp { [CLIENT_ID]: { body: CLAUDE_CODE_DOC } }
+
+      class TwoMounts extends lapis.Application
+        layout: false
+
+      router = McpHttpRouter!
+      router\mount "/one", TestServer, oauth: oauth_opts grants, http
+      router\mount "/two", TestServer, oauth: oauth_opts grants, http
+      router\install TwoMounts
+
+      consent, headers = show_consent TwoMounts, nil, { user: 1, path: "/one" }
+      _, _, res_headers = submit_consent TwoMounts, consent.consent_token, prev: headers, path: "/one"
+      code = redirect_params(res_headers).code
+
+      status, body = exchange TwoMounts, code, nil, "/two"
+      assert.same 400, status
+      assert.same "invalid_grant", body.error
+      assert.same 0, count_rows grants
 
     it "rejects other grant types", ->
       app = build_app!

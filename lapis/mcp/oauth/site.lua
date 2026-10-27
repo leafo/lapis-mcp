@@ -233,6 +233,9 @@ do
         grant:delete()
         return nil, 400, code, description
       end
+      if not (grant.resource == self.config:resource_url(route.req)) then
+        return reject("invalid_grant", "code was issued for another resource")
+      end
       if not (args.client_id == grant.client_id) then
         return reject("invalid_grant", "client_id mismatch")
       end

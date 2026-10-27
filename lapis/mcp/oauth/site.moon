@@ -227,6 +227,9 @@ class SiteMode
       grant\delete!
       nil, 400, code, description
 
+    -- mounts can share a grant store, a code is only for the mount that
+    -- approved it, which also decides the token's lifetime
+    return reject "invalid_grant", "code was issued for another resource" unless grant.resource == @config\resource_url route.req
     return reject "invalid_grant", "client_id mismatch" unless args.client_id == grant.client_id
     return reject "invalid_grant", "redirect_uri mismatch" unless args.redirect_uri == grant.redirect_uri
     return reject "invalid_grant", "PKCE verification failed" unless verify_pkce args.code_verifier, grant.code_challenge
