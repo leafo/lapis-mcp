@@ -209,6 +209,9 @@ do
       if not (grant) then
         error("grants\\create_for_code didn't return a grant")
       end
+      if self.opts.grant_created then
+        self.opts.grant_created(route, grant)
+      end
       return respond({
         code = code
       })
@@ -285,6 +288,9 @@ do
       for _index_0 = 1, #_list_0 do
         local name = _list_0[_index_0]
         assert(type(self.opts[name]) == "function", "oauth." .. tostring(name) .. " must be a function")
+      end
+      if self.opts.grant_created ~= nil then
+        assert(type(self.opts.grant_created) == "function", "oauth.grant_created must be a function")
       end
       self.grants = self.opts.grants
       self.access_token_ttl = self.opts.access_token_ttl or DEFAULT_ACCESS_TOKEN_TTL

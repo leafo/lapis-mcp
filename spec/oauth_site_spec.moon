@@ -163,6 +163,10 @@ describe "oauth site mode", ->
       opts.render_consent = nil
       assert.has_error (-> OauthConfig opts), "oauth.render_consent must be a function"
 
+      opts = oauth_opts MemoryGrants!, StubHttp!
+      opts.grant_created = "yes"
+      assert.has_error (-> OauthConfig opts), "oauth.grant_created must be a function"
+
     it "requires trusted_client_hosts", ->
       opts = oauth_opts MemoryGrants!, StubHttp!
       opts.trusted_client_hosts = nil
@@ -289,6 +293,29 @@ describe "oauth site mode", ->
       assert.same 1, grant.user_id
       assert.same "Claude Code", grant.client_name
       assert.same RESOURCE, grant.resource
+
+    it "calls grant_created with the new grant when approved", ->
+      created = {}
+      app, grants = build_app oauth: {
+        grant_created: (route, grant) -> table.insert created, grant
+      }
+
+      consent, headers = show_consent app
+      submit_consent app, consent.consent_token, prev: headers
+
+      assert.same 1, #created
+      _, grant = next grants.rows
+      assert.equal grant, created[1]
+
+    it "doesn't call grant_created when denied", ->
+      created = 0
+      app = build_app oauth: {
+        grant_created: -> created += 1
+      }
+
+      consent, headers = show_consent app
+      submit_consent app, consent.consent_token, prev: headers, approve: false
+      assert.same 0, created
 
     it "redirects with access_denied when denied", ->
       app, grants = build_app!

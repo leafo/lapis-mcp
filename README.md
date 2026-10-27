@@ -1102,6 +1102,7 @@ numbers or booleans.
 - `current_user(route)` (required): returns the logged in user, or `nil`. lapis-mcp only passes it to `owner_values`.
 - `login_url(route, return_to)` (required): the URL of your login page, which must redirect to `return_to` after login.
 - `render_consent(route, consent)` (required): renders the consent page, see above.
+- `grant_created(route, grant)` (optional): called after the user approves a client, with the new grant, for example to record it in an activity log. The client hasn't exchanged its code for an access token yet.
 - `cache` (optional): caches metadata documents, any object with `get(key)` and `set(key, value, ttl)` such as an `ngx.shared` dict. Without it each authorize request fetches the document.
 - `access_token_ttl` (optional): seconds an access token lasts. Defaults to 90 days.
 - `public_base_url`, `issuer` and `resource` work as for service tokens.

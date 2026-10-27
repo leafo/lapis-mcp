@@ -30,6 +30,10 @@
 -- The owner values are put in the consent token, so they must be plain
 -- strings, numbers or booleans.
 --
+-- grant_created(route, grant), optional, is called after the user approves
+-- a client, for example to record it in an activity log. The client hasn't
+-- exchanged its code for an access token yet at that point.
+--
 -- There are no refresh tokens: access tokens last access_token_ttl seconds
 -- (90 days by default) and then the user connects again.
 
@@ -78,6 +82,9 @@ class SiteMode
     assert @opts.grants, "oauth.grants is required"
     for name in *{"current_user", "login_url", "render_consent"}
       assert type(@opts[name]) == "function", "oauth.#{name} must be a function"
+
+    if @opts.grant_created != nil
+      assert type(@opts.grant_created) == "function", "oauth.grant_created must be a function"
 
     @grants = @opts.grants
     @access_token_ttl = @opts.access_token_ttl or DEFAULT_ACCESS_TOKEN_TTL
@@ -209,6 +216,8 @@ class SiteMode
 
     grant = @grants\create_for_code values, CODE_TTL
     error "grants\\create_for_code didn't return a grant" unless grant
+
+    @opts.grant_created route, grant if @opts.grant_created
 
     respond :code
 
