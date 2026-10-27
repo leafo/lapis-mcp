@@ -52,9 +52,7 @@ grant_store_behaviour = function(get_store, opts)
     end
     local tokens = {
       access_hash = random_hash(),
-      access_ttl = 3600,
-      refresh_hash = random_hash(),
-      refresh_ttl = 30 * 24 * 60 * 60
+      access_ttl = 3600
     }
     for k, v in pairs(overrides) do
       tokens[k] = v
@@ -132,87 +130,14 @@ grant_store_behaviour = function(get_store, opts)
           redirect_uri = "http://localhost:2222/callback"
         })
         assert.same("http://localhost:1111/callback", (store:find_by_access(first.access_hash)).redirect_uri)
-        assert.same("http://localhost:2222/callback", (store:find_by_access(second.access_hash)).redirect_uri)
-        return assert.falsy(store:find_by_access(first.refresh_hash))
-      end)
-    end)
-    describe("rotate_refresh", function()
-      it("replaces both tokens", function()
-        local grant, tokens = connected_grant()
-        local rotated = new_tokens()
-        local result = store:rotate_refresh(tokens.refresh_hash, rotated)
-        assert.truthy(result)
-        assert.same(grant.client_id, result.client_id)
-        assert.falsy(store:find_by_access(tokens.access_hash))
-        return assert.truthy(store:find_by_access(rotated.access_hash))
-      end)
-      it("works after the access token has expired", function()
-        local _, tokens = connected_grant({
-          access_ttl = -10
-        })
-        local rotated = new_tokens()
-        assert.truthy(store:rotate_refresh(tokens.refresh_hash, rotated))
-        return assert.truthy(store:find_by_access(rotated.access_hash))
-      end)
-      it("can rotate repeatedly", function()
-        local _, tokens = connected_grant()
-        local second = new_tokens()
-        assert.truthy(store:rotate_refresh(tokens.refresh_hash, second))
-        local third = new_tokens()
-        assert.truthy(store:rotate_refresh(second.refresh_hash, third))
-        return assert.truthy(store:find_by_access(third.access_hash))
-      end)
-      it("reports a reused refresh token with its grant", function()
-        local _, tokens = connected_grant(nil, {
-          redirect_uri = "http://localhost:1111/callback"
-        })
-        local other
-        _, other = connected_grant(nil, {
-          redirect_uri = "http://localhost:2222/callback"
-        })
-        local rotated = new_tokens()
-        store:rotate_refresh(tokens.refresh_hash, rotated)
-        local result, err, reused_grant = store:rotate_refresh(tokens.refresh_hash, new_tokens())
-        assert.falsy(result)
-        assert.same("reused", err)
-        assert.truthy(reused_grant)
-        assert.same("http://localhost:1111/callback", reused_grant.redirect_uri)
-        reused_grant:delete()
-        assert.falsy(store:find_by_access(rotated.access_hash))
-        assert.falsy(store:rotate_refresh(rotated.refresh_hash, new_tokens()))
-        return assert.truthy(store:find_by_access(other.access_hash))
-      end)
-      it("only remembers the most recently replaced refresh token", function()
-        local _, tokens = connected_grant()
-        local second = new_tokens()
-        store:rotate_refresh(tokens.refresh_hash, second)
-        local third = new_tokens()
-        store:rotate_refresh(second.refresh_hash, third)
-        local result, err = store:rotate_refresh(tokens.refresh_hash, new_tokens())
-        assert.falsy(result)
-        assert.falsy(err)
-        return assert.truthy(store:find_by_access(third.access_hash))
-      end)
-      it("returns nil for an unknown refresh token", function()
-        local result, err = store:rotate_refresh(random_hash(), new_tokens())
-        assert.falsy(result)
-        return assert.falsy(err)
-      end)
-      return it("returns nil for an expired refresh token", function()
-        local _, tokens = connected_grant({
-          refresh_ttl = -10
-        })
-        local result, err = store:rotate_refresh(tokens.refresh_hash, new_tokens())
-        assert.falsy(result)
-        return assert.falsy(err)
+        return assert.same("http://localhost:2222/callback", (store:find_by_access(second.access_hash)).redirect_uri)
       end)
     end)
     return describe("delete", function()
       it("revokes the grant's tokens", function()
         local grant, tokens = connected_grant()
         grant:delete()
-        assert.falsy(store:find_by_access(tokens.access_hash))
-        return assert.falsy(store:rotate_refresh(tokens.refresh_hash, new_tokens()))
+        return assert.falsy(store:find_by_access(tokens.access_hash))
       end)
       return it("leaves other grants alone", function()
         local grant = connected_grant()

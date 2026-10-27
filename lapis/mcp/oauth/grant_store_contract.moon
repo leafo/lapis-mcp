@@ -30,24 +30,18 @@
 --   store\find_by_access(access_hash) -> grant | nil
 --     nil for an unknown or expired access token.
 --
---   store\rotate_refresh(refresh_hash, tokens) -> grant | nil, "reused", grant
---     Replaces both tokens, whether or not the access token has expired. The
---     replaced refresh token is remembered: presenting it again returns nil,
---     "reused" and its grant, so lapis-mcp can delete it. Only the most
---     recently replaced refresh token is remembered, older ones are unknown.
---     nil for an unknown or expired refresh token.
---
 --   grant\delete!
 --     Removes the grant, its tokens stop working.
 --
--- tokens is {:access_hash, :access_ttl, :refresh_hash, :refresh_ttl}, with
--- the ttls in seconds from now. A grant exposes client_id, client_name,
--- redirect_uri, code_challenge and resource as fields.
+-- tokens is {:access_hash, :access_ttl}, with the ttl in seconds from now.
+-- There are no refresh tokens: when the access token expires the user
+-- connects again. A grant exposes client_id, client_name, redirect_uri,
+-- code_challenge and resource as fields.
 --
--- redeem_code and rotate_refresh must be atomic, or two concurrent requests
--- can both succeed with the same code or refresh token. With a database, use
--- a single conditional UPDATE ... WHERE code_hash = ? ... RETURNING rather
--- than a SELECT followed by an UPDATE. These tests run one request at a time,
+-- redeem_code must be atomic, or two concurrent requests can both redeem the
+-- same code. With a database, use a single conditional
+-- UPDATE ... WHERE code_hash = ? ... RETURNING rather than a SELECT followed
+-- by an UPDATE. These tests run one request at a time,
 -- so they can't check this.
 
 digest = require "openssl.digest"
@@ -87,8 +81,6 @@ grant_store_behaviour = (get_store, opts={}) ->
     tokens = {
       access_hash: random_hash!
       access_ttl: 3600
-      refresh_hash: random_hash!
-      refresh_ttl: 30 * 24 * 60 * 60
     }
     for k, v in pairs overrides
       tokens[k] = v
@@ -159,81 +151,12 @@ grant_store_behaviour = (get_store, opts={}) ->
         _, second = connected_grant nil, redirect_uri: "http://localhost:2222/callback"
         assert.same "http://localhost:1111/callback", (store\find_by_access first.access_hash).redirect_uri
         assert.same "http://localhost:2222/callback", (store\find_by_access second.access_hash).redirect_uri
-        assert.falsy store\find_by_access first.refresh_hash
-
-    describe "rotate_refresh", ->
-      it "replaces both tokens", ->
-        grant, tokens = connected_grant!
-        rotated = new_tokens!
-        result = store\rotate_refresh tokens.refresh_hash, rotated
-        assert.truthy result
-        assert.same grant.client_id, result.client_id
-
-        assert.falsy store\find_by_access tokens.access_hash
-        assert.truthy store\find_by_access rotated.access_hash
-
-      it "works after the access token has expired", ->
-        _, tokens = connected_grant access_ttl: -10
-        rotated = new_tokens!
-        assert.truthy store\rotate_refresh tokens.refresh_hash, rotated
-        assert.truthy store\find_by_access rotated.access_hash
-
-      it "can rotate repeatedly", ->
-        _, tokens = connected_grant!
-        second = new_tokens!
-        assert.truthy store\rotate_refresh tokens.refresh_hash, second
-        third = new_tokens!
-        assert.truthy store\rotate_refresh second.refresh_hash, third
-        assert.truthy store\find_by_access third.access_hash
-
-      it "reports a reused refresh token with its grant", ->
-        _, tokens = connected_grant nil, redirect_uri: "http://localhost:1111/callback"
-        _, other = connected_grant nil, redirect_uri: "http://localhost:2222/callback"
-
-        rotated = new_tokens!
-        store\rotate_refresh tokens.refresh_hash, rotated
-
-        result, err, reused_grant = store\rotate_refresh tokens.refresh_hash, new_tokens!
-        assert.falsy result
-        assert.same "reused", err
-        assert.truthy reused_grant
-        assert.same "http://localhost:1111/callback", reused_grant.redirect_uri
-
-        -- deleting the reported grant revokes its current tokens, and only its
-        reused_grant\delete!
-        assert.falsy store\find_by_access rotated.access_hash
-        assert.falsy store\rotate_refresh rotated.refresh_hash, new_tokens!
-        assert.truthy store\find_by_access other.access_hash
-
-      it "only remembers the most recently replaced refresh token", ->
-        _, tokens = connected_grant!
-        second = new_tokens!
-        store\rotate_refresh tokens.refresh_hash, second
-        third = new_tokens!
-        store\rotate_refresh second.refresh_hash, third
-
-        result, err = store\rotate_refresh tokens.refresh_hash, new_tokens!
-        assert.falsy result
-        assert.falsy err
-        assert.truthy store\find_by_access third.access_hash
-
-      it "returns nil for an unknown refresh token", ->
-        result, err = store\rotate_refresh random_hash!, new_tokens!
-        assert.falsy result
-        assert.falsy err
-
-      it "returns nil for an expired refresh token", ->
-        _, tokens = connected_grant refresh_ttl: -10
-        result, err = store\rotate_refresh tokens.refresh_hash, new_tokens!
-        assert.falsy result
-        assert.falsy err
 
     describe "delete", ->
       it "revokes the grant's tokens", ->
         grant, tokens = connected_grant!
         grant\delete!
         assert.falsy store\find_by_access tokens.access_hash
-        assert.falsy store\rotate_refresh tokens.refresh_hash, new_tokens!
 
       it "leaves other grants alone", ->
         grant = connected_grant!

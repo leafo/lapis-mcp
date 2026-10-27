@@ -17,9 +17,6 @@
 --     {"code_expires_at", time null: true}
 --     {"access_hash", text null: true}
 --     {"access_expires_at", time null: true}
---     {"refresh_hash", text null: true}
---     {"previous_refresh_hash", text null: true}
---     {"refresh_expires_at", time null: true}
 --     {"last_used_at", time null: true}
 --     {"created_at", time}
 --     {"updated_at", time}
@@ -27,8 +24,6 @@
 --   }
 --   create_index "mcp_grants", "code_hash", unique: true, where: "code_hash is not null"
 --   create_index "mcp_grants", "access_hash", unique: true, where: "access_hash is not null"
---   create_index "mcp_grants", "refresh_hash", unique: true, where: "refresh_hash is not null"
---   create_index "mcp_grants", "previous_refresh_hash", where: "previous_refresh_hash is not null"
 --
 -- plus a column for each key your owner_values returns (user_id above). Times
 -- are UTC, like the timestamps Lapis models write, so the time columns must
@@ -54,8 +49,6 @@ token_assigns = (tokens) ->
   {
     access_hash: tokens.access_hash
     access_expires_at: from_now tokens.access_ttl
-    refresh_hash: tokens.refresh_hash
-    refresh_expires_at: from_now tokens.refresh_ttl
     updated_at: db.raw NOW
   }
 
@@ -103,26 +96,10 @@ class OauthGrantModel extends Model
 
     grant
 
-  @rotate_refresh: (refresh_hash, tokens) =>
-    -- SET expressions read the row before the update, so the old
-    -- refresh_hash is what gets remembered
-    assigns = token_assigns tokens
-    assigns.previous_refresh_hash = db.raw "refresh_hash"
-
-    if grant = update_returning @, assigns, "refresh_hash = ? AND refresh_expires_at > #{NOW}", refresh_hash
-      return grant
-
-    -- checked after the update, so a concurrent request that lost the race
-    -- for the same refresh token is reported as reuse too
-    if reused = @find previous_refresh_hash: refresh_hash
-      return nil, "reused", reused
-
-    nil
-
   -- deletes grants whose code expired without being redeemed, and grants
-  -- whose refresh token has expired. Returns the number of rows deleted
+  -- whose access token has expired. Returns the number of rows deleted
   @delete_expired: =>
-    res = db.query "DELETE FROM #{db.escape_identifier @table_name!} WHERE (access_hash IS NULL AND code_expires_at < #{NOW}) OR refresh_expires_at < #{NOW}"
+    res = db.query "DELETE FROM #{db.escape_identifier @table_name!} WHERE (access_hash IS NULL AND code_expires_at < #{NOW}) OR access_expires_at < #{NOW}"
     res.affected_rows
 
 { :OauthGrantModel }

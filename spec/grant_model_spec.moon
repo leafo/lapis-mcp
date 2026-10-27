@@ -56,9 +56,6 @@ create_grants_table = ->
     {"code_expires_at", time null: true}
     {"access_hash", text null: true}
     {"access_expires_at", time null: true}
-    {"refresh_hash", text null: true}
-    {"previous_refresh_hash", text null: true}
-    {"refresh_expires_at", time null: true}
     {"last_used_at", time null: true}
     {"created_at", time}
     {"updated_at", time}
@@ -66,8 +63,6 @@ create_grants_table = ->
   }
   create_index "mcp_grants", "code_hash", unique: true, where: "code_hash is not null"
   create_index "mcp_grants", "access_hash", unique: true, where: "access_hash is not null"
-  create_index "mcp_grants", "refresh_hash", unique: true, where: "refresh_hash is not null"
-  create_index "mcp_grants", "previous_refresh_hash", where: "previous_refresh_hash is not null"
 
 unless db_available!
   describe "OauthGrantModel", ->
@@ -120,8 +115,6 @@ describe "OauthGrantModel", ->
     McpGrants\redeem_code "b"\rep(64), {
       access_hash: "c"\rep 64
       access_ttl: 3600
-      refresh_hash: "d"\rep 64
-      refresh_ttl: 3600
     }
 
     found = McpGrants\find_by_access "c"\rep 64
@@ -154,19 +147,17 @@ describe "OauthGrantModel", ->
         :code_hash
       }, code_ttl
 
-    connect = (code_hash, refresh_ttl) ->
+    connect = (code_hash, access_ttl) ->
       make code_hash
       McpGrants\redeem_code code_hash, {
         access_hash: "#{code_hash}-access"
-        access_ttl: 3600
-        refresh_hash: "#{code_hash}-refresh"
-        refresh_ttl: refresh_ttl
+        :access_ttl
       }
 
     make "pending-code"
     make "expired-code", -10
     live = connect "live", 3600
-    connect "expired-refresh", -10
+    connect "expired-access", -10
 
     assert.same 2, McpGrants\delete_expired!
 

@@ -13,8 +13,6 @@ token_assigns = function(tokens)
   return {
     access_hash = tokens.access_hash,
     access_expires_at = from_now(tokens.access_ttl),
-    refresh_hash = tokens.refresh_hash,
-    refresh_expires_at = from_now(tokens.refresh_ttl),
     updated_at = db.raw(NOW)
   }
 end
@@ -94,27 +92,8 @@ do
     end
     return grant
   end
-  self.rotate_refresh = function(self, refresh_hash, tokens)
-    local assigns = token_assigns(tokens)
-    assigns.previous_refresh_hash = db.raw("refresh_hash")
-    do
-      local grant = update_returning(self, assigns, "refresh_hash = ? AND refresh_expires_at > " .. tostring(NOW), refresh_hash)
-      if grant then
-        return grant
-      end
-    end
-    do
-      local reused = self:find({
-        previous_refresh_hash = refresh_hash
-      })
-      if reused then
-        return nil, "reused", reused
-      end
-    end
-    return nil
-  end
   self.delete_expired = function(self)
-    local res = db.query("DELETE FROM " .. tostring(db.escape_identifier(self:table_name())) .. " WHERE (access_hash IS NULL AND code_expires_at < " .. tostring(NOW) .. ") OR refresh_expires_at < " .. tostring(NOW))
+    local res = db.query("DELETE FROM " .. tostring(db.escape_identifier(self:table_name())) .. " WHERE (access_hash IS NULL AND code_expires_at < " .. tostring(NOW) .. ") OR access_expires_at < " .. tostring(NOW))
     return res.affected_rows
   end
   if _parent_0.__inherited then

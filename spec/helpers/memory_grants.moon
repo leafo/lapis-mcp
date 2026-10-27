@@ -32,8 +32,6 @@ class MemoryGrants
     now = os.time!
     row.access_hash = tokens.access_hash
     row.access_expires_at = now + tokens.access_ttl
-    row.refresh_hash = tokens.refresh_hash
-    row.refresh_expires_at = now + tokens.refresh_ttl
 
   create_for_code: (values, code_ttl) =>
     row = MemoryGrant @, values
@@ -54,16 +52,5 @@ class MemoryGrants
 
   find_by_access: (access_hash) =>
     @find_row "access_hash", access_hash, "access_expires_at"
-
-  rotate_refresh: (refresh_hash, tokens) =>
-    if reused = @find_row "previous_refresh_hash", refresh_hash
-      return nil, "reused", reused
-
-    row = @find_row "refresh_hash", refresh_hash, "refresh_expires_at"
-    return nil unless row
-
-    row.previous_refresh_hash = row.refresh_hash
-    @set_tokens row, tokens
-    row
 
 { :MemoryGrants }
