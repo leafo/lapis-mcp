@@ -16,6 +16,11 @@
 -- "invalid_client_id", "untrusted_host", "fetch_failed" or
 -- "invalid_document", with a description for logging or an error page.
 --
+-- check runs only the checks that don't need a fetch, so a caller can do
+-- something in between, like asking the user to log in:
+--
+--   host, err, description = resolver\check client_id
+--
 -- Documents are fetched with lapis.http, which doesn't follow redirects.
 -- Under nginx that's a subrequest to the /proxy location, so its settings
 -- decide how the fetch behaves:
@@ -145,7 +150,7 @@ log_value = (value) ->
   (value\gsub "[%c\\]", (c) -> string.format "\\%03d", c\byte!)
 
 log_rejection = (client_id, err, description) ->
-  return unless ngx
+  return unless ngx and ngx.log
   ngx.log ngx.WARN, "lapis-mcp: rejected client ", log_value(client_id), ": ", err, ": ", log_value(description)
 
 class ClientMetadata
@@ -161,7 +166,7 @@ class ClientMetadata
     @cache = opts.cache
     @http = opts.http
 
-  resolve: (client_id) =>
+  check: (client_id) =>
     host, description = parse_client_id client_id
     unless host
       log_rejection client_id, "invalid_client_id", description
@@ -171,6 +176,12 @@ class ClientMetadata
       description = "#{host} is not a trusted client host"
       log_rejection client_id, "untrusted_host", description
       return nil, "untrusted_host", description
+
+    host
+
+  resolve: (client_id) =>
+    host, err, description = @check client_id
+    return nil, err, description unless host
 
     if cached = @cache_get client_id
       return cached.client if cached.client

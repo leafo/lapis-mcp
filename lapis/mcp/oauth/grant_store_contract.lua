@@ -1,12 +1,9 @@
-local digest = require("openssl.digest")
 local rand = require("openssl.rand")
+local sha256_hex
+sha256_hex = require("lapis.mcp.oauth.util").sha256_hex
 local random_hash
 random_hash = function()
-  local h = digest.new("sha256")
-  h:update(rand.bytes(32))
-  return (h:final():gsub(".", function(c)
-    return string.format("%02x", c:byte())
-  end))
+  return sha256_hex(rand.bytes(32))
 end
 local grant_store_behaviour
 grant_store_behaviour = function(get_store, opts)

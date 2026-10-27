@@ -34,15 +34,18 @@ do
         }, json.array_mt)
       }
     end,
-    check_client = function(self, client_id)
+    check_client = function(self, route, client_id)
       if not (client_id == self.opts.client_id) then
-        return {
+        return nil, {
           status = 400,
           json = {
             error = "invalid_client"
           }
         }
       end
+      return {
+        redirect_uris = self.opts.allowed_redirect_uris
+      }
     end,
     authorize = function(self, route, request)
       local code = encode_with_secret({

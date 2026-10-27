@@ -45,15 +45,30 @@ verify_bearer = function(header, expected)
   end
   return secure_compare(token, expected)
 end
+local sha256
+sha256 = function(s)
+  local digest = require("openssl.digest")
+  local h = digest.new("sha256")
+  h:update(s)
+  return h:final()
+end
+local sha256_hex
+sha256_hex = function(s)
+  return (sha256(s):gsub(".", function(c)
+    return string.format("%02x", c:byte())
+  end))
+end
+local random_token
+random_token = function()
+  local rand = require("openssl.rand")
+  return base64url_no_pad(rand.bytes(32))
+end
 local verify_pkce
 verify_pkce = function(verifier, challenge)
   if not (type(verifier) == "string" and type(challenge) == "string") then
     return false
   end
-  local digest = require("openssl.digest")
-  local h = digest.new("sha256")
-  h:update(verifier)
-  return secure_compare(base64url_no_pad(h:final()), challenge)
+  return secure_compare(base64url_no_pad(sha256(verifier)), challenge)
 end
 local is_s256_challenge
 is_s256_challenge = function(challenge)
@@ -118,6 +133,22 @@ redirect_uri_allowed = function(uri, allowed_uris)
   end
   return false
 end
+local same_resource
+same_resource = function(a, b)
+  local normalize
+  normalize = function(uri)
+    local scheme, host, port, rest = parse_uri(uri)
+    if not (scheme) then
+      return nil
+    end
+    if port ~= "" then
+      port = ":" .. tostring(port)
+    end
+    return tostring(scheme) .. "://" .. tostring(host) .. tostring(port) .. tostring(rest:gsub("/$", ""))
+  end
+  a = normalize(a)
+  return a ~= nil and a == normalize(b)
+end
 local redirect_to_client
 redirect_to_client = function(redirect_uri, params)
   local sep = redirect_uri:find("?", 1, true) and "&" or "?"
@@ -130,6 +161,9 @@ return {
   parse_authorization = parse_authorization,
   verify_bearer = verify_bearer,
   verify_pkce = verify_pkce,
+  sha256_hex = sha256_hex,
+  same_resource = same_resource,
+  random_token = random_token,
   is_s256_challenge = is_s256_challenge,
   parse_uri = parse_uri,
   is_loopback_uri = is_loopback_uri,

@@ -33,6 +33,7 @@ build = {
     ["lapis.mcp.oauth.client_metadata"] = "lapis/mcp/oauth/client_metadata.lua",
     ["lapis.mcp.oauth.grant_model"] = "lapis/mcp/oauth/grant_model.lua",
     ["lapis.mcp.oauth.grant_store_contract"] = "lapis/mcp/oauth/grant_store_contract.lua",
+    ["lapis.mcp.oauth.site"] = "lapis/mcp/oauth/site.lua",
     ["lapis.mcp.oauth.static"] = "lapis/mcp/oauth/static.lua",
     ["lapis.mcp.oauth.util"] = "lapis/mcp/oauth/util.lua",
     ["lapis.mcp.server"] = "lapis/mcp/server.lua",

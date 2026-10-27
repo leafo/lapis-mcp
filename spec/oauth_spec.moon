@@ -155,6 +155,12 @@ describe "oauth shim", ->
     assert.same {"S256"}, result.code_challenge_methods_supported
     assert.is_true result.authorization_response_iss_parameter_supported
 
+  it "ignores the resource parameter", ->
+    app = build_app "/mcp"
+    status, _, headers = authorize app, { resource: "https://other.example/mcp" }
+    assert.equal 302, status
+    assert.is_string parse_query_string(headers.location\match "%?(.*)$").code
+
   describe "authorize errors", ->
     -- returns the params of an error redirect back to the client
     redirected_error = (status, headers) ->

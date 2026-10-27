@@ -133,7 +133,7 @@ server_class_for = function(server_module)
   end
 end
 local mcp_handler
-mcp_handler = function(ServerClass, opts)
+mcp_handler = function(ServerClass, opts, oauth_config)
   if opts == nil then
     opts = { }
   end
@@ -141,9 +141,8 @@ mcp_handler = function(ServerClass, opts)
   local bearer_token = opts.bearer_token
   assert(not (oauth and bearer_token), "MCP mount cannot set both 'oauth' and 'bearer_token'")
   local mount_path = opts.path or "/"
-  local oauth_config
   if oauth then
-    oauth_config = OauthConfig(oauth, mount_path)
+    oauth_config = oauth_config or OauthConfig(oauth, mount_path)
   end
   return respond_to({
     before = function(self)
@@ -169,7 +168,7 @@ mcp_handler = function(ServerClass, opts)
       end
       local auth = nil
       if oauth then
-        auth = oauth_config:verify_bearer_token(self.req.headers["authorization"])
+        auth = oauth_config:verify_bearer_token(self.req.headers["authorization"], self.req)
         if not (auth) then
           local metadata_url = oauth_config:protected_resource_metadata_url(self.req)
           self:write({
@@ -360,8 +359,9 @@ do
         local mount = _list_0[_index_0]
         local owner = "MCP mount " .. tostring(mount.path)
         claim_route(mount.path, owner)
+        local config
         if mount.opts.oauth then
-          local config = OauthConfig(mount.opts.oauth, mount.path)
+          config = OauthConfig(mount.opts.oauth, mount.path)
           local routes = config:routes()
           for _index_1 = 1, #routes do
             local route = routes[_index_1]
@@ -369,7 +369,7 @@ do
             app:match(route.path, route.handler)
           end
         end
-        app:match(mount.path, mcp_handler(mount.ServerClass, mount.opts))
+        app:match(mount.path, mcp_handler(mount.ServerClass, mount.opts, config))
       end
       return app
     end,

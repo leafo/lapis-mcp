@@ -759,7 +759,7 @@ options:
 - `load_session(req, server)` - Optional callback invoked after the server instance is created, on every request except CORS preflight. Use this to restore per-session state, customize visibility, or apply authentication-derived state to the server. `server.auth` is already set when it runs (see below).
 - `create_session_id(req, server)` - Optional callback invoked for `initialize` requests. If it returns a value, it is written to the `Mcp-Session-Id` response header.
 - `bearer_token` - Optional static bearer token required on MCP endpoint requests; see [Authenticating with a Static Bearer Token](#authenticating-with-a-static-bearer-token).
-- `oauth` - Optional table that turns on the OAuth shim for this mount; see [Authenticating with OAuth](#authenticating-with-oauth-service-tokens).
+- `oauth` - Optional table that turns on OAuth for this mount: either users of your site log in and approve each client (see [Authenticating with OAuth (User Login)](#authenticating-with-oauth-user-login)), or a static service token (see [Authenticating with OAuth (Service Tokens)](#authenticating-with-oauth-service-tokens)).
 
 Because HTTP mode is stateless, any authentication or session persistence is up
 to the surrounding Lapis application and these callbacks. For example, you can
@@ -769,8 +769,10 @@ restore the server state associated with the current request.
 
 Each server instance's `server.auth` describes how the request was
 authorized, so `load_session` and tool handlers can tell. It is `nil` on a
-mount without `bearer_token` or `oauth`, and `{static = true}` when the request
-presented the static bearer token or the OAuth shim's service token.
+mount without `bearer_token` or `oauth`, `{static = true}` when the request
+presented the static bearer token or the OAuth shim's service token, and
+`{grant = grant}` when it presented a user's access token (see
+[Authenticating with OAuth (User Login)](#authenticating-with-oauth-user-login)).
 
 #### Multiple HTTP MCP Apps
 
@@ -987,9 +989,138 @@ configured `access_token` to Claude, which sends it back as
 Because this is a service-token shim and not real user authentication, anyone
 with the configured `client_secret` (or `access_token`) can call the MCP
 server. Always serve over HTTPS, treat the secret like an API key, and rotate
-by updating the `oauth` table and restarting. If you need real user identity
-or per-user scopes, delegate to a proper authorization server instead of using
-this shim.
+by updating the `oauth` table and restarting. If you need real user identity,
+use [user login](#authenticating-with-oauth-user-login) instead.
+
+#### Authenticating with OAuth (User Login)
+
+With `grants` in the `oauth` table, the mount runs a real authorization flow
+for the users of your site: someone adds your MCP URL in Claude, logs in to
+your site in their browser, approves the connection, and Claude gets an access
+token for their account. lapis-mcp runs the OAuth protocol and stores the
+grants; your app supplies the user, the login page and the consent page, and
+lapis-mcp never needs to know what a user is.
+
+Clients identify themselves with a [Client ID Metadata
+Document](https://datatracker.ietf.org/doc/draft-ietf-oauth-client-id-metadata-document/):
+the `client_id` is an https URL serving the client's name and redirect URIs,
+so there's no client registration. Claude (claude.ai, Desktop, mobile and
+Claude Code) uses one hosted on `claude.ai`. Only clients on
+`trusted_client_hosts` can connect.
+
+The flow:
+
+1. Claude calls the MCP endpoint, gets a `401`, and discovers the
+   authorization server from the metadata routes.
+2. It opens `{mount_path}/oauth/authorize` in the browser. A user who isn't
+   logged in is sent to `login_url`, which must send them back afterwards.
+3. lapis-mcp fetches the client's metadata document, checks the
+   `redirect_uri` against it, and calls `render_consent`.
+4. The consent form posts back to the authorize route. On approval the user
+   is redirected to Claude with a code, which Claude exchanges at
+   `{mount_path}/oauth/token` (PKCE `S256` required).
+5. MCP requests carry the access token. `server.auth.grant` is the grant it
+   belongs to, use it in `load_session` to find the user.
+
+Access tokens last 90 days and there are no refresh tokens: when one expires,
+Claude asks the user to connect again.
+
+First create a grant model by extending `OauthGrantModel`, with a migration
+for its table. The columns it needs are listed at the top of
+`lapis/mcp/oauth/grant_model.moon`, plus whatever identifies the owner, which
+`owner_values` returns:
+
+```moonscript
+import OauthGrantModel from require "lapis.mcp.oauth.grant_model"
+
+class McpGrants extends OauthGrantModel
+  @owner_values: (user) => { user_id: user.id }
+```
+
+Then mount the server:
+
+```moonscript
+router\mount "/mcp", MyMcpServer, {
+  oauth: {
+    grants: McpGrants
+    trusted_client_hosts: {"claude.ai"}
+    cache: ngx.shared.mcp_clients -- optional, caches metadata documents
+
+    current_user: (route) -> route.current_user
+    login_url: (route, return_to) -> route\url_for "login", nil, :return_to
+    render_consent: (route, consent) ->
+      route.consent = consent
+      render: "mcp_consent"
+  }
+
+  load_session: (req, server) ->
+    server.user = Users\find server.auth.grant.user_id
+}
+```
+
+`render_consent` receives the request and a `consent` table, and returns a
+Lapis response. The page must show who is asking and where the user will be
+sent, and post `consent_token` to `action`, with `approve` set to approve and
+without it to deny:
+
+```html
+<p>
+  <strong><%= consent.client_host %></strong> (<%= consent.client_name %>)
+  wants to access your account.
+</p>
+<% if consent.redirect_loopback then %>
+  <p>You'll be sent back to an app running on your own computer.</p>
+<% else %>
+  <p>You'll be sent back to <%= consent.redirect_host %>.</p>
+<% end %>
+<form method="post" action="<%= consent.action %>">
+  <input type="hidden" name="consent_token" value="<%= consent.consent_token %>">
+  <button name="approve" value="1">Allow</button>
+  <button>Cancel</button>
+</form>
+```
+
+Name the client by `client_host`, `client_name` is whatever the client chose.
+`X-Frame-Options: DENY`, `Content-Security-Policy: frame-ancestors 'none'` and
+`Cache-Control: no-store` are added to the page's response unless it sets
+them. The consent token is signed with your app's `secret`, expires after 10
+minutes, and only works in the browser session it was shown in and for the
+user it was shown to, so the form needs no CSRF token of its own. The token
+includes the owner values, so `owner_values` must return plain strings,
+numbers or booleans.
+
+##### User Login Options
+
+- `grants` (required): the grant store, usually an `OauthGrantModel` subclass. Any object that passes the contract tests in `lapis.mcp.oauth.grant_store_contract` works.
+- `trusted_client_hosts` (required): hosts whose metadata documents are accepted, matched exactly. `{"claude.ai"}` for Claude.
+- `current_user(route)` (required): returns the logged in user, or `nil`. lapis-mcp only passes it to `owner_values`.
+- `login_url(route, return_to)` (required): the URL of your login page, which must redirect to `return_to` after login.
+- `render_consent(route, consent)` (required): renders the consent page, see above.
+- `cache` (optional): caches metadata documents, any object with `get(key)` and `set(key, value, ttl)` such as an `ngx.shared` dict. Without it each authorize request fetches the document.
+- `access_token_ttl` (optional): seconds an access token lasts. Defaults to 90 days.
+- `public_base_url`, `issuer` and `resource` work as for service tokens.
+
+##### Running It
+
+- Metadata documents are fetched with `lapis.http`, which under nginx goes
+  through the `/proxy` location. Its TLS settings decide whether trusting a
+  host means anything, so set `proxy_ssl_verify on`,
+  `proxy_ssl_trusted_certificate` and `proxy_ssl_server_name on` there.
+- Expired grants aren't deleted automatically. Call `McpGrants\delete_expired!`
+  periodically, for example from a cron job.
+- Rejected clients are logged as warnings, with the reason. A client that
+  can't connect shows up there.
+- Run the grant store contract tests against your model in your own test
+  suite:
+
+  ```moonscript
+  import grant_store_behaviour from require "lapis.mcp.oauth.grant_store_contract"
+
+  describe "McpGrants", ->
+    grant_store_behaviour (-> McpGrants), {
+      owner_values: -> { user_id: factory.Users!.id }
+    }
+  ```
 
 ## The `lapis mcp` Subcommand
 

@@ -34,13 +34,25 @@ verify_bearer = (header, expected) ->
   return false unless scheme == "bearer"
   secure_compare token, expected
 
+sha256 = (s) ->
+  digest = require "openssl.digest"
+  h = digest.new "sha256"
+  h\update s
+  h\final!
+
+-- lowercase hex SHA-256, how codes and tokens are stored
+sha256_hex = (s) ->
+  (sha256(s)\gsub ".", (c) -> string.format "%02x", c\byte!)
+
+-- an unguessable code or token, 32 random bytes in base64url
+random_token = ->
+  rand = require "openssl.rand"
+  base64url_no_pad rand.bytes 32
+
 -- only S256 is supported, as required by OAuth 2.1 and the MCP spec
 verify_pkce = (verifier, challenge) ->
   return false unless type(verifier) == "string" and type(challenge) == "string"
-  digest = require "openssl.digest"
-  h = digest.new "sha256"
-  h\update verifier
-  secure_compare base64url_no_pad(h\final!), challenge
+  secure_compare base64url_no_pad(sha256 verifier), challenge
 
 -- an S256 challenge is a base64url encoded SHA-256 digest without padding
 is_s256_challenge = (challenge) ->
@@ -93,6 +105,18 @@ redirect_uri_allowed = (uri, allowed_uris) ->
 
   false
 
+-- compares RFC 8707 resource URIs ignoring the case of the scheme and host
+-- and a trailing slash, so https://Host/mcp/ matches https://host/mcp
+same_resource = (a, b) ->
+  normalize = (uri) ->
+    scheme, host, port, rest = parse_uri uri
+    return nil unless scheme
+    port = ":#{port}" if port != ""
+    "#{scheme}://#{host}#{port}#{rest\gsub "/$", ""}"
+
+  a = normalize a
+  a != nil and a == normalize b
+
 -- appends response params to the client's redirect_uri
 redirect_to_client = (redirect_uri, params) ->
   sep = redirect_uri\find("?", 1, true) and "&" or "?"
@@ -105,6 +129,9 @@ redirect_to_client = (redirect_uri, params) ->
   :parse_authorization
   :verify_bearer
   :verify_pkce
+  :sha256_hex
+  :same_resource
+  :random_token
   :is_s256_challenge
   :parse_uri
   :is_loopback_uri

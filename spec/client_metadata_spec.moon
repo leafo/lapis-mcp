@@ -1,7 +1,8 @@
 json = require "cjson"
 
 import ClientMetadata, parse_client_id from require "lapis.mcp.oauth.client_metadata"
-import is_loopback_uri, parse_uri from require "lapis.mcp.oauth.util"
+import is_loopback_uri, parse_uri, same_resource from require "lapis.mcp.oauth.util"
+import StubHttp from require "spec.helpers.stub_http"
 
 CLAUDE_CODE_ID = "https://claude.ai/oauth/claude-code-client-metadata"
 
@@ -15,31 +16,6 @@ CLAUDE_CODE_DOC = {
   response_types: {"code"}
   token_endpoint_auth_method: "none"
 }
-
--- a lapis.http stand-in that serves canned responses by URL and records
--- requests. A response is {status, body, headers}, or {error: msg} to raise
-class StubHttp
-  new: (@responses={}) =>
-    @requests = {}
-    -- lapis.http.request is a plain function, not a method
-    @request = (req) -> @handle req
-
-  handle: (req) =>
-    table.insert @requests, req
-    res = @responses[req.url]
-    error res.error if res and res.error
-    return nil, "connection refused" unless res
-
-    body = res.body
-    body = json.encode body if type(body) == "table"
-    if req.sink
-      -- delivered in chunks, like a real response
-      for i=1,#body,1024
-        ok, err = req.sink body\sub i, i + 1023
-        return nil, err unless ok
-      req.sink nil
-
-    1, res.status or 200, res.headers or {}
 
 class StubCache
   new: =>
@@ -101,6 +77,13 @@ describe "client metadata", ->
     }
       it "rejects #{uri}", ->
         assert.false is_loopback_uri uri
+
+    it "compares resources ignoring case and a trailing slash", ->
+      assert.true same_resource "https://Example.com/mcp/", "https://example.com/mcp"
+      assert.false same_resource "https://example.com/mcp", "https://example.com/mcp2"
+      assert.false same_resource "https://example.com:8443/mcp", "https://example.com/mcp"
+      assert.false same_resource nil, nil
+      assert.false same_resource {}, "https://example.com/mcp"
 
     it "parses a URI with a port", ->
       assert.same {"https", "client.example", "8443", "/cb"}, {parse_uri "HTTPS://Client.Example:8443/cb"}

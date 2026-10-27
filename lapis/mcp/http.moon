@@ -75,15 +75,17 @@ server_class_for = (server_module) ->
     server_module
 
 
-mcp_handler = (ServerClass, opts={}) ->
+-- oauth_config is passed by the router so the mount's routes and its bearer
+-- checks share one config, otherwise it's built from opts.oauth
+mcp_handler = (ServerClass, opts={}, oauth_config) ->
   oauth = opts.oauth
   bearer_token = opts.bearer_token
   assert not (oauth and bearer_token), "MCP mount cannot set both 'oauth' and 'bearer_token'"
 
   mount_path = opts.path or "/"
 
-  oauth_config = if oauth
-    OauthConfig oauth, mount_path
+  if oauth
+    oauth_config or= OauthConfig oauth, mount_path
 
   respond_to {
     before: =>
@@ -109,7 +111,7 @@ mcp_handler = (ServerClass, opts={}) ->
       auth = nil
 
       if oauth
-        auth = oauth_config\verify_bearer_token @req.headers["authorization"]
+        auth = oauth_config\verify_bearer_token @req.headers["authorization"], @req
         unless auth
           metadata_url = oauth_config\protected_resource_metadata_url @req
           @write {
@@ -260,6 +262,7 @@ class McpHttpRouter
       owner = "MCP mount #{mount.path}"
       claim_route mount.path, owner
 
+      local config
       if mount.opts.oauth
         config = OauthConfig mount.opts.oauth, mount.path
         routes = config\routes!
@@ -267,7 +270,7 @@ class McpHttpRouter
           claim_route route.path, owner
           app\match route.path, route.handler
 
-      app\match mount.path, mcp_handler mount.ServerClass, mount.opts
+      app\match mount.path, mcp_handler mount.ServerClass, mount.opts, config
 
     app
 

@@ -169,7 +169,7 @@ log_value = function(value)
 end
 local log_rejection
 log_rejection = function(client_id, err, description)
-  if not (ngx) then
+  if not (ngx and ngx.log) then
     return 
   end
   return ngx.log(ngx.WARN, "lapis-mcp: rejected client ", log_value(client_id), ": ", err, ": ", log_value(description))
@@ -178,7 +178,7 @@ local ClientMetadata
 do
   local _class_0
   local _base_0 = {
-    resolve = function(self, client_id)
+    check = function(self, client_id)
       local host, description = parse_client_id(client_id)
       if not (host) then
         log_rejection(client_id, "invalid_client_id", description)
@@ -189,6 +189,13 @@ do
         log_rejection(client_id, "untrusted_host", description)
         return nil, "untrusted_host", description
       end
+      return host
+    end,
+    resolve = function(self, client_id)
+      local host, err, description = self:check(client_id)
+      if not (host) then
+        return nil, err, description
+      end
       do
         local cached = self:cache_get(client_id)
         if cached then
@@ -198,7 +205,7 @@ do
           return nil, cached.error, cached.description
         end
       end
-      local client, err, ttl
+      local client, ttl
       client, err, description, ttl = self:fetch(client_id, host)
       if client then
         self:cache_set(client_id, {

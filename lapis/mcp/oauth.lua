@@ -8,6 +8,8 @@ do
 end
 local StaticMode
 StaticMode = require("lapis.mcp.oauth.static").StaticMode
+local SiteMode
+SiteMode = require("lapis.mcp.oauth.site").SiteMode
 local OauthConfig
 do
   local _class_0
@@ -47,8 +49,11 @@ do
       end
       return tostring(base) .. tostring(segment)
     end,
-    verify_bearer_token = function(self, header)
-      return self.mode:verify_bearer_token(header)
+    authorize_url = function(self, req)
+      return tostring(self:issuer_url(req)) .. "/oauth/authorize"
+    end,
+    verify_bearer_token = function(self, header, req)
+      return self.mode:verify_bearer_token(header, req)
     end,
     protected_resource_handler = function(self)
       local config = self
@@ -77,7 +82,7 @@ do
         local issuer = config:issuer_url(route.req)
         local metadata = {
           issuer = issuer,
-          authorization_endpoint = tostring(issuer) .. "/oauth/authorize",
+          authorization_endpoint = config:authorize_url(route.req),
           token_endpoint = tostring(issuer) .. "/oauth/token",
           response_types_supported = setmetatable({
             "code"
@@ -102,6 +107,18 @@ do
     authorize_handler = function(self)
       local config = self
       return respond_to({
+        POST = function(route)
+          if config.mode.consent_post then
+            return config.mode:consent_post(route)
+          else
+            return {
+              status = 405,
+              json = {
+                error = "method_not_allowed"
+              }
+            }
+          end
+        end,
         GET = function(route)
           local params = route.params
           local response_type = params.response_type
@@ -110,11 +127,9 @@ do
           local state = params.state
           local code_challenge = params.code_challenge
           local code_challenge_method = params.code_challenge_method or "plain"
-          do
-            local err_response = config.mode:check_client(client_id)
-            if err_response then
-              return err_response
-            end
+          local client, err_response = config.mode:check_client(route, client_id)
+          if not (client) then
+            return err_response
           end
           if not (type(redirect_uri) == "string") then
             return {
@@ -134,8 +149,8 @@ do
               }
             }
           end
-          if config.opts.allowed_redirect_uris then
-            if not (redirect_uri_allowed(redirect_uri, config.opts.allowed_redirect_uris)) then
+          if client.redirect_uris then
+            if not (redirect_uri_allowed(redirect_uri, client.redirect_uris)) then
               return {
                 status = 400,
                 json = {
@@ -168,10 +183,13 @@ do
             return redirect_error("invalid_request", "code_challenge is not a valid S256 challenge")
           end
           return config.mode:authorize(route, {
+            client = client,
             client_id = client_id,
             redirect_uri = redirect_uri,
             state = state,
             code_challenge = code_challenge,
+            resource = config:resource_url(route.req),
+            requested_resource = params.resource,
             iss = iss
           })
         end
@@ -283,7 +301,13 @@ do
         mount_path = "/"
       end
       self.opts, self.mount_path = opts, mount_path
-      self.mode = StaticMode(self.opts)
+      if self.opts.grants then
+        assert(not self.opts.client_secret, "oauth can't set both grants and client_secret")
+        assert(not self.opts.allowed_redirect_uris, "oauth.allowed_redirect_uris doesn't apply with grants, redirect URIs come from each client's metadata document")
+        self.mode = SiteMode(self.opts, self)
+      else
+        self.mode = StaticMode(self.opts)
+      end
       do
         local uris = self.opts.allowed_redirect_uris
         if uris then

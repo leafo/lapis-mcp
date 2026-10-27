@@ -32,11 +32,14 @@ class StaticMode
       token_endpoint_auth_methods_supported: setmetatable {"client_secret_post", "client_secret_basic"}, json.array_mt
     }
 
-  -- returns an error response when the client is unknown. It runs before the
-  -- redirect_uri is validated, so the error is shown to the user directly
-  check_client: (client_id) =>
+  -- returns the client, or nil and an error response when it's unknown. It
+  -- runs before the redirect_uri is validated, so the error is shown to the
+  -- user directly. A nil redirect_uris allows any redirect_uri
+  check_client: (route, client_id) =>
     unless client_id == @opts.client_id
-      return { status: 400, json: {error: "invalid_client"} }
+      return nil, { status: 400, json: {error: "invalid_client"} }
+
+    { redirect_uris: @opts.allowed_redirect_uris }
 
   -- called with a fully validated authorization request, approves it
   -- immediately since there is no user to log in

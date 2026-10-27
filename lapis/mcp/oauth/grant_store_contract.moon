@@ -44,14 +44,11 @@
 -- by an UPDATE. These tests run one request at a time,
 -- so they can't check this.
 
-digest = require "openssl.digest"
 rand = require "openssl.rand"
+import sha256_hex from require "lapis.mcp.oauth.util"
 
 -- a random value shaped like the SHA-256 hashes lapis-mcp passes
-random_hash = ->
-  h = digest.new "sha256"
-  h\update rand.bytes 32
-  (h\final!\gsub ".", (c) -> string.format "%02x", c\byte!)
+random_hash = -> sha256_hex rand.bytes 32
 
 grant_store_behaviour = (get_store, opts={}) ->
   import describe, it, before_each, assert from require "busted"
