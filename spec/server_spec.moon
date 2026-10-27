@@ -1782,6 +1782,39 @@ describe "McpServer", ->
 
       assert.equal initial_count + 1, #mock_transport.messages
 
+  describe "tool_allowed", ->
+    it "refuses tools that aren't allowed", ->
+      class LimitedServer extends McpServer
+        @add_tool {
+          name: "read-tool"
+          description: "Read tool"
+          inputSchema: { type: "object", properties: {}, required: {} }
+        }, -> "read"
+
+        @add_tool {
+          name: "write-tool"
+          description: "Write tool"
+          inputSchema: { type: "object", properties: {}, required: {} }
+        }, -> "write"
+
+        tool_allowed: (tool) => tool.name == "read-tool"
+
+      server = LimitedServer!
+      server\skip_initialize!
+
+      assert.same {"read-tool"}, [tool.name for tool in *server\get_enabled_tools!]
+
+      response = server\handle_tools_call {
+        jsonrpc: "2.0"
+        id: 1
+        method: "tools/call"
+        params: { name: "write-tool", arguments: {} }
+      }
+      assert.same "Unknown tool: write-tool", response.error.message
+
+      assert.same {nil, "Unknown tool: write-tool"}, {server\execute_tool "write-tool"}
+      assert.same "read", server\execute_tool "read-tool"
+
   describe "set_visibility_by_tags", ->
     it "should hide tools that don't match provided tags", ->
       class TagServer extends McpServer

@@ -441,7 +441,7 @@ class McpServer
   -- Returns result on success, or nil and an error message on failure
   execute_tool: (tool_name, arguments={}) =>
     tool = @find_tool tool_name
-    unless tool
+    unless tool and @tool_allowed tool
       return nil, "Unknown tool: #{tool_name}"
 
     @invoke_tool tool, arguments
@@ -614,7 +614,7 @@ class McpServer
 
     tool = @find_tool tool_name
 
-    unless tool
+    unless tool and @tool_allowed tool
       @debug_log "error", "Unknown tool: #{tool_name}"
       return error_response message.id, -32602, "Unknown tool: #{tool_name}"
 
@@ -662,9 +662,15 @@ class McpServer
   get_all_tools: =>
     collect_all_tools @__class
 
+  -- Override to limit the tools an instance can use, for example to what the
+  -- user approved for an OAuth grant. Unlike hidden and tool_visibility,
+  -- which only filter the list, a tool that isn't allowed can't be called
+  tool_allowed: (tool) => true
+
   -- Get enabled (visible) tools as an array, respecting tool_visibility and hidden
   get_enabled_tools: =>
     tools = for name, tool in pairs @get_all_tools!
+      continue unless @tool_allowed tool
       is_visible = if @tool_visibility[tool.name] != nil
         @tool_visibility[tool.name]
       else

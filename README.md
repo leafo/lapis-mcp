@@ -761,6 +761,19 @@ options:
 - `bearer_token` - Optional static bearer token required on MCP endpoint requests; see [Authenticating with a Static Bearer Token](#authenticating-with-a-static-bearer-token).
 - `oauth` - Optional table that turns on OAuth for this mount: either users of your site log in and approve each client (see [Authenticating with OAuth (User Login)](#authenticating-with-oauth-user-login)), or a static service token (see [Authenticating with OAuth (Service Tokens)](#authenticating-with-oauth-service-tokens)).
 
+Hiding a tool only removes it from `tools/list`. To stop a connection from
+calling tools, override `tool_allowed(tool)`. Tools it returns false for are
+left out of `tools/list` and refused by `tools/call`:
+
+```moonscript
+class MyServer extends McpServer
+  tool_allowed: (tool) => @allowed_tools[tool.name]
+
+-- in the mount options, with tools the user picked stored on the grant
+load_session: (req, server) ->
+  server.allowed_tools = allowed_tools_for server.auth.grant
+```
+
 Because HTTP mode is stateless, any authentication or session persistence is up
 to the surrounding Lapis application and these callbacks. For example, you can
 perform your own auth checks before the route runs, then use `load_session` to

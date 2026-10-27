@@ -345,7 +345,7 @@ do
         arguments = { }
       end
       local tool = self:find_tool(tool_name)
-      if not (tool) then
+      if not (tool and self:tool_allowed(tool)) then
         return nil, "Unknown tool: " .. tostring(tool_name)
       end
       return self:invoke_tool(tool, arguments)
@@ -530,7 +530,7 @@ do
         return error_response(message.id, -32602, "Missing required parameter: name")
       end
       local tool = self:find_tool(tool_name)
-      if not (tool) then
+      if not (tool and self:tool_allowed(tool)) then
         self:debug_log("error", "Unknown tool: " .. tostring(tool_name))
         return error_response(message.id, -32602, "Unknown tool: " .. tostring(tool_name))
       end
@@ -573,6 +573,9 @@ do
     get_all_tools = function(self)
       return collect_all_tools(self.__class)
     end,
+    tool_allowed = function(self, tool)
+      return true
+    end,
     get_enabled_tools = function(self)
       local tools
       do
@@ -581,6 +584,10 @@ do
         for name, tool in pairs(self:get_all_tools()) do
           local _continue_0 = false
           repeat
+            if not (self:tool_allowed(tool)) then
+              _continue_0 = true
+              break
+            end
             local is_visible
             if self.tool_visibility[tool.name] ~= nil then
               is_visible = self.tool_visibility[tool.name]
