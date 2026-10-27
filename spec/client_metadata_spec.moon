@@ -224,6 +224,15 @@ describe "client metadata", ->
       client = resolve_doc doc_with client_name: json.null
       assert.same "client.example", client.client_name
 
+    it "accepts ChatGPT's document, which prefers private_key_jwt but supports none", ->
+      client = resolve_doc doc_with {
+        token_endpoint_auth_method: "private_key_jwt"
+        token_endpoint_auth_methods_supported: {"none", "private_key_jwt"}
+        token_endpoint_auth_signing_alg: "RS256"
+        jwks_uri: "https://client.example/jwks.json"
+      }
+      assert.truthy client
+
     it "accepts a null token_endpoint_auth_method", ->
       assert.truthy resolve_doc doc_with token_endpoint_auth_method: json.null
 
@@ -249,7 +258,11 @@ describe "client metadata", ->
         rejects doc_with(client_id: "https://client.example/other.json"), "client_id doesn't match"
 
       it "with a secret based auth method", ->
-        rejects doc_with(token_endpoint_auth_method: "client_secret_post"), "must be none"
+        rejects doc_with(token_endpoint_auth_method: "client_secret_post"), "must support token_endpoint_auth_method none"
+        rejects doc_with({
+          token_endpoint_auth_method: "private_key_jwt"
+          token_endpoint_auth_methods_supported: {"private_key_jwt"}
+        }), "must support token_endpoint_auth_method none"
 
       it "without redirect_uris", ->
         rejects doc_with(redirect_uris: json.null), "non-empty array"

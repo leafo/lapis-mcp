@@ -84,9 +84,19 @@ validate_document = function(doc, client_id, host)
     return nil, "the document's client_id doesn't match its URL"
   end
   local method = doc.token_endpoint_auth_method
-  if method ~= nil and method ~= json.null then
-    if not (method == "none") then
-      return nil, "token_endpoint_auth_method must be none"
+  if method ~= nil and method ~= json.null and method ~= "none" then
+    local supported = doc.token_endpoint_auth_methods_supported
+    local supports_none = false
+    if type(supported) == "table" then
+      for _index_0 = 1, #supported do
+        local m = supported[_index_0]
+        if m == "none" then
+          supports_none = true
+        end
+      end
+    end
+    if not (supports_none) then
+      return nil, "the client must support token_endpoint_auth_method none"
     end
   end
   local uris = doc.redirect_uris

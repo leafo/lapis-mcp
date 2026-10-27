@@ -110,9 +110,19 @@ validate_document = (doc, client_id, host) ->
   return nil, "the document is not a JSON object" unless type(doc) == "table"
   return nil, "the document's client_id doesn't match its URL" unless doc.client_id == client_id
 
+  -- token_endpoint_auth_method is only the client's preference, a client
+  -- listing none in token_endpoint_auth_methods_supported uses it with a
+  -- server that only offers none (ChatGPT prefers private_key_jwt)
   method = doc.token_endpoint_auth_method
-  if method != nil and method != json.null
-    return nil, "token_endpoint_auth_method must be none" unless method == "none"
+  if method != nil and method != json.null and method != "none"
+    supported = doc.token_endpoint_auth_methods_supported
+    supports_none = false
+    if type(supported) == "table"
+      for m in *supported
+        supports_none = true if m == "none"
+
+    unless supports_none
+      return nil, "the client must support token_endpoint_auth_method none"
 
   uris = doc.redirect_uris
   unless type(uris) == "table" and #uris > 0
