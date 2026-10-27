@@ -64,16 +64,34 @@ local LOOPBACK_HOSTS = {
   ["127.0.0.1"] = true,
   ["[::1]"] = true
 }
-local parse_redirect_uri
-parse_redirect_uri = function(uri)
+local parse_uri
+parse_uri = function(uri)
+  if not (type(uri) == "string") then
+    return nil
+  end
   local scheme, host, port, rest = uri:match("^(%a[%w+.-]*)://(%[[^%]]+%]):?(%d*)(.*)$")
   if not (scheme) then
-    scheme, host, port, rest = uri:match("^(%a[%w+.-]*)://([^/:?#%[]+):?(%d*)(.*)$")
+    scheme, host, port, rest = uri:match("^(%a[%w+.-]*)://([^/:?#%[@]+):?(%d*)(.*)$")
   end
   if not (scheme) then
     return nil
   end
+  if not (rest == "" or rest:match("^[/?#]")) then
+    return nil
+  end
   return scheme:lower(), host:lower(), port, rest
+end
+local loopback_parts
+loopback_parts = function(uri)
+  local scheme, host, port, rest = parse_uri(uri)
+  if not (scheme == "http" and LOOPBACK_HOSTS[host]) then
+    return nil
+  end
+  return scheme, host, port, rest
+end
+local is_loopback_uri
+is_loopback_uri = function(uri)
+  return (loopback_parts(uri)) ~= nil
 end
 local redirect_uri_allowed
 redirect_uri_allowed = function(uri, allowed_uris)
@@ -86,14 +104,14 @@ redirect_uri_allowed = function(uri, allowed_uris)
       return true
     end
   end
-  local scheme, host, _, rest = parse_redirect_uri(uri)
-  if not (scheme == "http" and LOOPBACK_HOSTS[host]) then
+  local scheme, host, _, rest = loopback_parts(uri)
+  if not (scheme) then
     return false
   end
   for _index_0 = 1, #allowed_uris do
     local allowed = allowed_uris[_index_0]
     local a_scheme, a_host, a_rest
-    a_scheme, a_host, _, a_rest = parse_redirect_uri(allowed)
+    a_scheme, a_host, _, a_rest = parse_uri(allowed)
     if scheme == a_scheme and host == a_host and rest == a_rest then
       return true
     end
@@ -113,6 +131,8 @@ return {
   verify_bearer = verify_bearer,
   verify_pkce = verify_pkce,
   is_s256_challenge = is_s256_challenge,
+  parse_uri = parse_uri,
+  is_loopback_uri = is_loopback_uri,
   redirect_uri_allowed = redirect_uri_allowed,
   redirect_to_client = redirect_to_client
 }

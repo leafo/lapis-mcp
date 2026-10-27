@@ -53,14 +53,30 @@ LOOPBACK_HOSTS = {
   "[::1]": true
 }
 
-parse_redirect_uri = (uri) ->
+-- splits an absolute URI into its lowercased scheme and host, port and the
+-- rest (path, query and fragment). Returns nil for userinfo, or anything
+-- after the authority that isn't a path, query or fragment, so
+-- http://localhost:@evil.example/ doesn't parse as a localhost URI
+parse_uri = (uri) ->
+  return nil unless type(uri) == "string"
+
   -- IPv6 literal hosts are bracketed, and contain colons
   scheme, host, port, rest = uri\match "^(%a[%w+.-]*)://(%[[^%]]+%]):?(%d*)(.*)$"
   unless scheme
-    scheme, host, port, rest = uri\match "^(%a[%w+.-]*)://([^/:?#%[]+):?(%d*)(.*)$"
+    scheme, host, port, rest = uri\match "^(%a[%w+.-]*)://([^/:?#%[@]+):?(%d*)(.*)$"
 
   return nil unless scheme
+  return nil unless rest == "" or rest\match "^[/?#]"
   scheme\lower!, host\lower!, port, rest
+
+-- only http loopback URIs get the any port rule
+loopback_parts = (uri) ->
+  scheme, host, port, rest = parse_uri uri
+  return nil unless scheme == "http" and LOOPBACK_HOSTS[host]
+  scheme, host, port, rest
+
+is_loopback_uri = (uri) ->
+  (loopback_parts uri) != nil
 
 redirect_uri_allowed = (uri, allowed_uris) ->
   return false unless type(uri) == "string"
@@ -68,12 +84,11 @@ redirect_uri_allowed = (uri, allowed_uris) ->
   for allowed in *allowed_uris
     return true if uri == allowed
 
-  -- only http loopback URIs get the any port rule
-  scheme, host, _, rest = parse_redirect_uri uri
-  return false unless scheme == "http" and LOOPBACK_HOSTS[host]
+  scheme, host, _, rest = loopback_parts uri
+  return false unless scheme
 
   for allowed in *allowed_uris
-    a_scheme, a_host, _, a_rest = parse_redirect_uri allowed
+    a_scheme, a_host, _, a_rest = parse_uri allowed
     return true if scheme == a_scheme and host == a_host and rest == a_rest
 
   false
@@ -91,6 +106,8 @@ redirect_to_client = (redirect_uri, params) ->
   :verify_bearer
   :verify_pkce
   :is_s256_challenge
+  :parse_uri
+  :is_loopback_uri
   :redirect_uri_allowed
   :redirect_to_client
 }
