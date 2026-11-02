@@ -1004,6 +1004,7 @@ do
       add_tags = types.array_of(types.string):is_optional(),
       filter_tags = types.array_of(types.string):is_optional(),
       exclude = types.array_of(types.string):is_optional(),
+      only = types.array_of(types.string):is_optional(),
       group = types.string:is_optional()
     }):is_optional()
   }, function(self, other_server_class, opts)
@@ -1014,6 +1015,28 @@ do
     local target_name = self.server_name or self.__name or "McpServer"
     local source_name = other_server_class.server_name or other_server_class.__name or "McpServer"
     local source_tools = collect_all_tools(other_server_class)
+    if opts.only and opts.exclude then
+      error("include on " .. tostring(target_name) .. ": only and exclude can't be used together")
+    end
+    local only
+    if opts.only then
+      do
+        local _tbl_0 = { }
+        local _list_0 = opts.only
+        for _index_0 = 1, #_list_0 do
+          local name = _list_0[_index_0]
+          _tbl_0[name] = true
+        end
+        only = _tbl_0
+      end
+    end
+    if only then
+      for name in pairs(only) do
+        if not (source_tools[name]) then
+          error("include only on " .. tostring(target_name) .. ": source " .. tostring(source_name) .. " has no tool named " .. tostring(name))
+        end
+      end
+    end
     local excluded
     if opts.exclude then
       do
@@ -1036,6 +1059,10 @@ do
     for original_name, tool in pairs(source_tools) do
       local _continue_0 = false
       repeat
+        if only and not only[original_name] then
+          _continue_0 = true
+          break
+        end
         if excluded and excluded[original_name] then
           _continue_0 = true
           break

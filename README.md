@@ -335,6 +335,7 @@ Notes about composition:
 - Handlers run with the receiving server instance as `self`, so included tools can call methods like `@get_server_name!` on the composed server.
 - Included classes contribute inherited tools too, not just tools defined directly on that class.
 - `exclude` takes a list of source tool names (before `prefix` is applied) to skip, eg. `@include SharedFileTools, exclude: {"read"}`. Naming a tool the source doesn't have raises an error.
+- `only` takes a list of source tool names (before `prefix` is applied) to include, skipping everything else, eg. `@include SharedFileTools, only: {"read"}`. Tools added to the source later stay out until they are named. Naming a tool the source doesn't have raises an error, and `only` can't be combined with `exclude`.
 - `group` sets `tool.group` on every included tool, overriding any group the source tool had. `@add_tool` also accepts `group`. It is server-side metadata for organizing tools (eg. toggling a set of tools in a UI) and is not sent to MCP clients.
 - `@include` raises an error if the final tool name already exists on the receiving server or from another include. Use `prefix` to avoid collisions.
 

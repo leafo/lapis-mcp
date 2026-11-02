@@ -228,6 +228,7 @@ class McpServer
       add_tags: types.array_of(types.string)\is_optional!
       filter_tags: types.array_of(types.string)\is_optional!
       exclude: types.array_of(types.string)\is_optional!
+      only: types.array_of(types.string)\is_optional!
       group: types.string\is_optional!
     })\is_optional!
   }, (other_server_class, opts={}) =>
@@ -238,6 +239,17 @@ class McpServer
 
     source_tools = collect_all_tools other_server_class
 
+    if opts.only and opts.exclude
+      error "include on #{target_name}: only and exclude can't be used together"
+
+    only = if opts.only
+      {name, true for name in *opts.only}
+
+    if only
+      for name in pairs only
+        unless source_tools[name]
+          error "include only on #{target_name}: source #{source_name} has no tool named #{name}"
+
     excluded = if opts.exclude
       {name, true for name in *opts.exclude}
 
@@ -247,6 +259,7 @@ class McpServer
           error "include exclude on #{target_name}: source #{source_name} has no tool named #{name}"
 
     for original_name, tool in pairs source_tools
+      continue if only and not only[original_name]
       continue if excluded and excluded[original_name]
       final_name = prefix .. original_name
 

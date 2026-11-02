@@ -568,6 +568,64 @@ describe "McpServer", ->
         class CombinedServer extends McpServer
           @include SharedServer, exclude: {"missing-tool"}
 
+    describe "only", ->
+      local SharedServer
+
+      before_each ->
+        class SharedServer extends McpServer
+          @add_tool {
+            name: "named-tool"
+            description: "Named tool"
+            inputSchema: { type: "object", properties: {}, required: {} }
+          }, -> "named result"
+
+          @add_tool {
+            name: "other-tool"
+            description: "Other tool"
+            inputSchema: { type: "object", properties: {}, required: {} }
+          }, -> "other result"
+
+      it "should only include the named tools", ->
+        class CombinedServer extends McpServer
+          @include SharedServer, prefix: "shared_", only: {"named-tool"}
+
+        server = CombinedServer!
+        assert.is_not_nil server\find_tool "shared_named-tool"
+        assert.is_nil server\find_tool "shared_other-tool"
+
+      it "should apply filter_tags to the named tools", ->
+        class TaggedServer extends McpServer
+          @add_tool {
+            name: "read-tool"
+            description: "Read tool"
+            tags: {"read"}
+            inputSchema: { type: "object", properties: {}, required: {} }
+          }, -> "read result"
+
+          @add_tool {
+            name: "write-tool"
+            description: "Write tool"
+            tags: {"write"}
+            inputSchema: { type: "object", properties: {}, required: {} }
+          }, -> "write result"
+
+        class CombinedServer extends McpServer
+          @include TaggedServer, only: {"read-tool", "write-tool"}, filter_tags: {"read"}
+
+        server = CombinedServer!
+        assert.is_not_nil server\find_tool "read-tool"
+        assert.is_nil server\find_tool "write-tool"
+
+      it "should error when only names a missing tool", ->
+        assert.has_error ->
+          class CombinedServer extends McpServer
+            @include SharedServer, only: {"missing-tool"}
+
+      it "should error when combined with exclude", ->
+        assert.has_error ->
+          class CombinedServer extends McpServer
+            @include SharedServer, only: {"named-tool"}, exclude: {"other-tool"}
+
     it "should set group on included tools", ->
       class InnerServer extends McpServer
         @add_tool {
